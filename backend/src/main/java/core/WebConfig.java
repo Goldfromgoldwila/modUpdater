@@ -13,7 +13,7 @@ public class WebConfig {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
                 registry.addMapping("/**")
-                        .allowedOrigins("https://modupdater.onrender.com", "https://modupdater.onrender.com") // Frontend URLs
+                        .allowedOrigins("https://modupdater.onrender.com", "https://goldfromgoldwila.github.io/modUpdater/") // Frontend URLs
                         .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                         .allowedHeaders("*")
                         .allowCredentials(true);
