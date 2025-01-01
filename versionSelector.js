@@ -12,7 +12,7 @@ document.getElementById("uploadForm").addEventListener("submit", async (event) =
         await new Promise(resolve => setTimeout(resolve, 5000));
 
         // Then convert
-        const convertResponse = await fetch("https://goldfromgoldwila.github.io/modUpdater/api/convert", {
+        const convertResponse = await fetch("https://modupdater.onrender.com/api/convert", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ version: selectedVersion })
