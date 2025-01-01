@@ -32,7 +32,7 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
 
     try {
         // Check server availability
-        const healthCheck = await fetch('http://localhost:8080/api/health', {
+        const healthCheck = await fetch('https://goldfromgoldwila.github.io/modUpdater/api/health', {
             method: 'GET',
             headers: {
                 'Cache-Control': 'no-cache'
@@ -44,7 +44,7 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
         }
 
         // Upload the file
-        const response = await fetch('http://localhost:8080/api/upload', {
+        const response = await fetch('https://goldfromgoldwila.github.io/modUpdater/api/upload', {
             method: 'POST',
             body: formData,
         });
@@ -62,7 +62,7 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
         console.log('File uploaded successfully:', textResponse);
 
         // Fetch logs after upload
-        const logsResponse = await fetch('http://localhost:8080/api/logs');
+        const logsResponse = await fetch('https://goldfromgoldwila.github.io/modUpdater/api/logs');
         if (logsResponse.ok) {
             const logs = await logsResponse.json(); // Parse logs response
             console.log('Server Logs:', logs);
