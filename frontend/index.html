@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="style.css">
+    <title>Minecraft Mod Updater</title>
+</head>
+<body>
+    <h1>Welcome to Minecraft Mod Updater</h1>
+    <form id="uploadForm">
+        <input type="file" id="modFile" name="modFile">
+
+        <select id="mc-version">
+            <option value="1.21">1.21</option>
+            <option value="1.21.1">1.21.1</option>
+            <option value="1.21.2">1.21.2</option>
+            <option value="1.21.3">1.21.3</option>
+            <option value="1.21.4">1.21.4</option>
+        </select>
+
+        <button type="submit">Upload</button>
+
+    </form>
+
+
+    <p id="result-message"></p>
+
+    <script src="versionSelector.js"></script>
+    <script src="upload.js"></script>
+</body>
+</html>

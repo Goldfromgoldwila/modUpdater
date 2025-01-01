@@ -1,0 +1,10 @@
+core\VersionComparator.class
+core\WebConfig$1.class
+core\ModDecompilerService.class
+core\WebConfig.class
+core\ConvertController.class
+core\ExtractJson.class
+core\HealthController.class
+core\Main.class
+core\UploadController.class
+core\LogController.class
