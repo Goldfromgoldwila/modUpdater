@@ -113,10 +113,10 @@ public class ExtractJson {
 
         while (matcher.find()) {
             upperVersion = matcher.group(1); // Get the first match
+        LOGGER.info("Extracted upper version: {}", upperVersion);
         }
 
         return upperVersion;
-        LOGGER.info("Extracted upper version: {}", upperVersion);
     }
 
     private JsonObject readJsonFile(File file) throws IOException {
