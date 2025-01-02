@@ -42,27 +42,33 @@ public class ExtractJson {
             "1.21.4", ">=0.92.0"
     );
 
+    
     public void processMod(String mcVersion) {
         try {
             LOGGER.info("Processing mod for Minecraft version: {}", mcVersion);
             File decompDir = findLatestModDirectory();
-
-            if (decompDir != null) {
-                File modJsonFile = new File(decompDir, MOD_JSON_FILE);
-
-                if (modJsonFile.exists()) {
-                    LOGGER.info("Mod JSON file found: {}", modJsonFile.getPath());
-                    modifyJsonFile(modJsonFile, mcVersion);
-                } else {
-                    LOGGER.error("Mod JSON file not found: {}", modJsonFile.getPath());
-                }
-            } else {
-                LOGGER.error("No decompiled directory found.");
+    
+            if (decompDir == null) {
+                LOGGER.error("Decompiled directory not found for Minecraft version: {}", mcVersion);
+                throw new IllegalStateException("Decompiled directory is missing.");
             }
+    
+            File modJsonFile = new File(decompDir, MOD_JSON_FILE);
+    
+            if (!modJsonFile.exists()) {
+                LOGGER.error("Mod JSON file not found: {}", modJsonFile.getPath());
+                throw new FileNotFoundException("Mod JSON file is missing in the directory: " + decompDir.getPath());
+            }
+    
+            LOGGER.info("Mod JSON file found: {}", modJsonFile.getPath());
+            modifyJsonFile(modJsonFile, mcVersion);
+    
         } catch (Exception e) {
-            LOGGER.error("Error processing mod: {}", e.getMessage(), e);
+            LOGGER.error("Error processing mod for version {}: {}", mcVersion, e.getMessage(), e);
+            throw new RuntimeException("Failed to process mod for version " + mcVersion, e);
         }
     }
+    
 
     private File findLatestModDirectory() {
         try {
