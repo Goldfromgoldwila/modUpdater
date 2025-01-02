@@ -36,7 +36,8 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
             method: 'GET',
             headers: {
                 'Cache-Control': 'no-cache'
-            }
+            },
+            mode: "cors",
         });
 
         if (!healthCheck.ok) {
@@ -47,6 +48,7 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
         const response = await fetch('https://modupdater.onrender.com/api/upload', {
             method: 'POST',
             body: formData,
+            mode: "cors",
         });
 
         // Log the raw response for debugging
