@@ -54,8 +54,6 @@ public class ExtractJson {
                 File modJsonFile = new File(decompDir, MOD_JSON_FILE);
                 if (modJsonFile.exists()) {
                     LOGGER.info("Validated existence of {}", modJsonFile.getPath());
-                    modifyJsonFile(modJsonFile, mcVersion);
-                    LOGGER.info("Successfully processed mod JSON for Minecraft version: {}", mcVersion);
                 } else {
                     LOGGER.error("Mod JSON file does not exist: {}", modJsonFile.getPath());
                 }
