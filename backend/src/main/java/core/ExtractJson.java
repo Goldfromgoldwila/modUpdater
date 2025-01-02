@@ -8,16 +8,13 @@ import org.springframework.stereotype.Component;
 import java.io.*;
 import java.nio.file.*;
 import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.regex.*;
 
 @Component
 public class ExtractJson {
     private static final Logger LOGGER = LoggerFactory.getLogger(ExtractJson.class);
     private static final String DECOMPILED_DIR = "decompiled_mods";
     private static final String MOD_JSON_FILE = "fabric.mod.json";
-    private static String lastProcessedMcVersion;
-    private static String lastProcessedOriginalVersion;
 
     private static final Map<String, String> FABRIC_LOADER_VERSIONS = Map.of(
             "1.20", ">=0.14.21",
@@ -47,18 +44,20 @@ public class ExtractJson {
 
     public void processMod(String mcVersion) {
         try {
-            LOGGER.info("Processing mods for Minecraft version: {}", mcVersion);
+            LOGGER.info("Processing mod for Minecraft version: {}", mcVersion);
             File decompDir = findLatestModDirectory();
 
             if (decompDir != null) {
                 File modJsonFile = new File(decompDir, MOD_JSON_FILE);
+
                 if (modJsonFile.exists()) {
-                    LOGGER.info("Validated existence of {}", modJsonFile.getPath());
+                    LOGGER.info("Mod JSON file found: {}", modJsonFile.getPath());
+                    modifyJsonFile(modJsonFile, mcVersion);
                 } else {
-                    LOGGER.error("Mod JSON file does not exist: {}", modJsonFile.getPath());
+                    LOGGER.error("Mod JSON file not found: {}", modJsonFile.getPath());
                 }
             } else {
-                LOGGER.error("Decompiled directory not found for Minecraft version: {}", mcVersion);
+                LOGGER.error("No decompiled directory found.");
             }
         } catch (Exception e) {
             LOGGER.error("Error processing mod: {}", e.getMessage(), e);
@@ -66,8 +65,8 @@ public class ExtractJson {
     }
 
     private File findLatestModDirectory() {
-        Path decompiledDirPath = Paths.get(DECOMPILED_DIR);
         try {
+            Path decompiledDirPath = Paths.get(DECOMPILED_DIR);
             return Files.list(decompiledDirPath)
                     .filter(Files::isDirectory)
                     .max(Comparator.comparingLong(path -> path.toFile().lastModified()))
@@ -83,40 +82,38 @@ public class ExtractJson {
         JsonObject jsonObject = readJsonFile(modJsonFile);
         JsonObject depends = getOrCreateDependsObject(jsonObject);
 
-        // Save the original Minecraft version
-        String originalVersion = depends.has("minecraft") ? depends.get("minecraft").getAsString() : "not set";
-        lastProcessedOriginalVersion = originalVersion;
-        LOGGER.info("Original Minecraft version: {}", originalVersion);
-
-        // Extract only the upper version
-        String upperVersion = extractUpperVersion(originalVersion);
-
-        // Update the Minecraft version with the upper version
-        depends.addProperty("minecraft", upperVersion);
-        lastProcessedMcVersion = upperVersion;
+        // Process Minecraft version
+        if (depends.has("minecraft")) {
+            String minecraftVersion = depends.get("minecraft").getAsString();
+            String updatedVersion = processMinecraftVersion(minecraftVersion, mcVersion);
+            depends.addProperty("minecraft", updatedVersion);
+        } else {
+            depends.addProperty("minecraft", mcVersion);
+        }
 
         // Update Fabric dependencies
-        Optional.ofNullable(FABRIC_LOADER_VERSIONS.get(upperVersion))
+        Optional.ofNullable(FABRIC_LOADER_VERSIONS.get(mcVersion))
                 .ifPresent(loaderVersion -> depends.addProperty("fabricloader", loaderVersion));
-        Optional.ofNullable(FABRIC_API_VERSIONS.get(upperVersion))
+        Optional.ofNullable(FABRIC_API_VERSIONS.get(mcVersion))
                 .ifPresent(apiVersion -> depends.addProperty("fabric-api", apiVersion));
 
-        // Save the updated JSON back to the file
+        LOGGER.info("Updated dependencies for Minecraft version: {}", mcVersion);
+
         saveJsonFile(modJsonFile, jsonObject);
     }
 
-    private String extractUpperVersion(String versionString) {
-        // Use regex to find the upper version
-        Pattern pattern = Pattern.compile("(?:>=|<=|>|<|=)?(\\d+\\.\\d+(?:\\.\\d+)?)");
-        Matcher matcher = pattern.matcher(versionString);
-        String upperVersion = "not set";
+    private String processMinecraftVersion(String versionString, String newMcVersion) {
+        String[] parts = versionString.split(" ");
+        String upperVersion = null;
 
-        while (matcher.find()) {
-            upperVersion = matcher.group(1); // Get the first match
-        LOGGER.info("Extracted upper version: {}", upperVersion);
+        for (String part : parts) {
+            if (part.contains("<=")) {
+                upperVersion = part.replace("<=", "").trim();
+            }
         }
 
-        return upperVersion;
+        LOGGER.info("Extracted upper Minecraft version: {}", upperVersion);
+        return newMcVersion;
     }
 
     private JsonObject readJsonFile(File file) throws IOException {
@@ -128,7 +125,7 @@ public class ExtractJson {
     private JsonObject getOrCreateDependsObject(JsonObject jsonObject) {
         if (!jsonObject.has("depends")) {
             jsonObject.add("depends", new JsonObject());
-            LOGGER.info("Created new 'depends' section");
+            LOGGER.info("Created 'depends' section.");
         }
         return jsonObject.getAsJsonObject("depends");
     }

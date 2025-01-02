@@ -17,18 +17,18 @@ public class ConvertController {
 
     @PostMapping("/convert")
     public ResponseEntity<?> convertVersion(@RequestBody Map<String, String> payload) {
-        String version = payload.get("version");
-        LOGGER.info("Received conversion request for version: {}", version);
-    
+        String mcVersion = payload.get("version");
+        LOGGER.info("Received conversion request for version: {}", mcVersion);
+
         try {
             ExtractJson extractJson = new ExtractJson();
-            extractJson.processMod(version);
-            LOGGER.info("Conversion successful for version: {}", version);
+            extractJson.processMod(mcVersion);
+            LOGGER.info("Conversion successful for version: {}", mcVersion);
             return ResponseEntity.ok(Map.of("message", "Conversion completed successfully!"));
         } catch (Exception e) {
             LOGGER.error("Error during conversion: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                                 .body(Map.of("error", "Internal server error."));
+                    .body(Map.of("error", "Internal server error."));
         }
     }
 }

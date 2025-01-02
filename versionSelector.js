@@ -9,7 +9,7 @@ document.getElementById("uploadForm").addEventListener("submit", async (event) =
         console.log("File uploaded! Please wait 5 seconds for processing...");
 
         // Add 5 second delay
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        await new Promise(resolve => setTimeout(resolve, 3500));
 
         // Then convert
         const convertResponse = await fetch("https://modupdater.onrender.com/api/convert", {
