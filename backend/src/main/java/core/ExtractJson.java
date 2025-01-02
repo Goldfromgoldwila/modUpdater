@@ -90,7 +90,6 @@ public class ExtractJson {
 
         // Extract only the upper version
         String upperVersion = extractUpperVersion(originalVersion);
-        LOGGER.info("Extracted upper version: {}", upperVersion);
 
         // Update the Minecraft version with the upper version
         depends.addProperty("minecraft", upperVersion);
@@ -117,6 +116,7 @@ public class ExtractJson {
         }
 
         return upperVersion;
+        LOGGER.info("Extracted upper version: {}", upperVersion);
     }
 
     private JsonObject readJsonFile(File file) throws IOException {
