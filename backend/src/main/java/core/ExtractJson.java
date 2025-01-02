@@ -89,7 +89,7 @@ public class ExtractJson {
         LOGGER.info("Original Minecraft version: {}", originalVersion);
 
         // Extract only the upper version
-        String upperVersion = extractUpperVersion(mcVersion);
+        String upperVersion = extractUpperVersion(originalVersion);
         LOGGER.info("Extracted upper version: {}", upperVersion);
 
         // Update the Minecraft version with the upper version

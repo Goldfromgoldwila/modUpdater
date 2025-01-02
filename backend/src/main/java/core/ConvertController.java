@@ -8,7 +8,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
-@CrossOrigin(origins = {"https://modupdater.onrender.com", "https://modupdater.onrender.com"})
+@CrossOrigin(origins = {"https://goldfromgoldwila.github.io", "https://modupdater.onrender.com"})
 @RestController
 @RequestMapping("/api")
 public class ConvertController {
