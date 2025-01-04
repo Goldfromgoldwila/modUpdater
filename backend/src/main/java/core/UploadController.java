@@ -40,6 +40,8 @@ public class UploadController {
             // Start decompilation process
             decompilerService.decompileLatestMod();
 
+            LOGGER.info("Uploaded mod: {}", fileName);
+
             return ResponseEntity.ok("File uploaded and decompilation started successfully");
         } catch (IOException e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
