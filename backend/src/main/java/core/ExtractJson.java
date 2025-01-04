@@ -11,6 +11,8 @@ import java.util.*;
 import java.util.regex.*;
 
 @Component
+@RestController
+@RequestMapping("/api")
 public class ExtractJson {
     private static final Logger LOGGER = LoggerFactory.getLogger(ExtractJson.class);
     private static final String DECOMPILED_DIR = "decompiled_mods";
@@ -119,14 +121,18 @@ public class ExtractJson {
     private String processMinecraftVersion(String versionString, String newMcVersion) {
         String[] parts = versionString.split(" ");
         String upperVersion = null;
-
+    
         for (String part : parts) {
             if (part.contains("<=")) {
                 upperVersion = part.replace("<=", "").trim();
             }
         }
-
-        LOGGER.info("Extracted upper Minecraft version: {}", upperVersion);
+    
+        if (upperVersion == null) {
+            upperVersion = versionString;
+        }
+    
+        LOGGER.info("Extracted Minecraft version: {}", upperVersion);
         return newMcVersion;
     }
 
@@ -160,5 +166,6 @@ public class ExtractJson {
             Gson gson = new GsonBuilder().setPrettyPrinting().create();
             gson.toJson(jsonObject, writer);
         }
+
     }
 }
