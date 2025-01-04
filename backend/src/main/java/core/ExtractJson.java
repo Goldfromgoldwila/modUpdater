@@ -4,6 +4,8 @@ import com.google.gson.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestMapping;
 
 import java.io.*;
 import java.nio.file.*;
@@ -19,29 +21,29 @@ public class ExtractJson {
     private static final String MOD_JSON_FILE = "fabric.mod.json";
 
     private static final Map<String, String> FABRIC_LOADER_VERSIONS = Map.of(
-            "1.20", ">=0.14.21",
-            "1.20.1", ">=0.14.21",
-            "1.20.2", ">=0.14.21",
-            "1.20.3", ">=0.15.0",
-            "1.20.4", ">=0.15.0",
-            "1.21", ">=0.15.0",
-            "1.21.1", ">=0.15.0",
-            "1.21.2", ">=0.15.0",
-            "1.21.3", ">=0.15.0",
-            "1.21.4", ">=0.15.0"
+        "1.20", ">=0.14.21",
+        "1.20.1", ">=0.14.21",
+        "1.20.2", ">=0.14.21",
+        "1.20.3", ">=0.15.0",
+        "1.20.4", ">=0.15.0",
+        "1.21", ">=0.15.0",
+        "1.21.1", ">=0.15.0",
+        "1.21.2", ">=0.15.0",
+        "1.21.3", ">=0.15.0",
+        "1.21.4", ">=0.15.0"
     );
 
     private static final Map<String, String> FABRIC_API_VERSIONS = Map.of(
-            "1.20", ">=0.83.0",
-            "1.20.1", ">=0.83.0",
-            "1.20.2", ">=0.89.0",
-            "1.20.3", ">=0.91.0",
-            "1.20.4", ">=0.91.0",
-            "1.21", ">=0.92.0",
-            "1.21.1", ">=0.92.0",
-            "1.21.2", ">=0.92.0",
-            "1.21.3", ">=0.92.0",
-            "1.21.4", ">=0.92.0"
+        "1.20", ">=0.83.0",
+        "1.20.1", ">=0.83.0",
+        "1.20.2", ">=0.89.0",
+        "1.20.3", ">=0.91.0",
+        "1.20.4", ">=0.91.0",
+        "1.21", ">=0.92.0",
+        "1.21.1", ">=0.92.0",
+        "1.21.2", ">=0.92.0",
+        "1.21.3", ">=0.92.0",
+        "1.21.4", ">=0.92.0"
     );
 
     public void processMod(String mcVersion) {
@@ -53,10 +55,10 @@ public class ExtractJson {
                 File modJsonFile = new File(decompDir, MOD_JSON_FILE);
 
                 if (modJsonFile.exists()) {
-                    LOGGER.info("Mod JSON file found: {}", modJsonFile.getPath);
+                    LOGGER.info("Mod JSON file found: {}", modJsonFile.getPath());
                     modifyJsonFile(modJsonFile, mcVersion);
                 } else {
-                    LOGGER.error("Mod JSON file not found: {}", modJsonFile.getPath);
+                    LOGGER.error("Mod JSON file not found: {}", modJsonFile.getPath());
                 }
             } else {
                 LOGGER.error("No decompiled directory found.");
@@ -88,7 +90,7 @@ public class ExtractJson {
         logFileContent(modJsonFile); // Log old file content
         JsonObject jsonObject = readJsonFile(modJsonFile);
         JsonObject depends = getOrCreateDependsObject(jsonObject);
-
+        
         // Log all changes made to the JSON file
         LOGGER.info("Old JSON data: {}", jsonObject);
         LOGGER.info("Old dependencies: {}", depends);
@@ -101,7 +103,7 @@ public class ExtractJson {
         } else {
             depends.addProperty("minecraft", mcVersion);
         }
-
+            
         // Update Fabric dependencies
         Optional.ofNullable(FABRIC_LOADER_VERSIONS.get(mcVersion))
                 .ifPresent(loaderVersion -> depends.addProperty("fabricloader", loaderVersion));
@@ -113,10 +115,9 @@ public class ExtractJson {
 
         // Save changes
         saveJsonFile(modJsonFile, jsonObject);
-
+        
         logFileContent(modJsonFile); // Log new file content
     }
-
 
     private String processMinecraftVersion(String versionString, String newMcVersion) {
         String[] parts = versionString.split(" ");
@@ -125,22 +126,25 @@ public class ExtractJson {
         for (String part : parts) {
             if (part.contains("<=")) {
                 upperVersion = part.replace("<=", "").trim();
+            } else if (part.contains(">=") && part.contains(".")) {
+                // Handle cases like ">=1.20"
+                upperVersion = part.replace(">=", "").trim();
             }
         }
-    
-        if (upperVersion == null) {
-            upperVersion = versionString;
+        // If no upper version found, fallback to the newMcVersion or existing version
+        if (upperVersion == null || upperVersion.isEmpty()) {
+            upperVersion = newMcVersion;
         }
     
-        LOGGER.info("Extracted Minecraft version: {}", upperVersion);
-        return newMcVersion;
+        LOGGER.info("Extracted upper Minecraft version: {}", upperVersion);
+        return upperVersion;
     }
-
+    
     private JsonObject readJsonFile(File file) throws IOException {
         try (FileReader reader = new FileReader(file)) {
             return JsonParser.parseReader(reader).getAsJsonObject();
         }
-    } 
+    }
 
     private void logFileContent(File file) {
         try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
@@ -166,6 +170,5 @@ public class ExtractJson {
             Gson gson = new GsonBuilder().setPrettyPrinting().create();
             gson.toJson(jsonObject, writer);
         }
-
     }
 }
