@@ -53,7 +53,17 @@ public class ExtractJson {
 
             if (decompDir != null) {
                 File modJsonFile = new File(decompDir, MOD_JSON_FILE);
+                int retryCount = 0;
+                int maxRetries = 5; // Maximum number of retries
 
+                    // Retry mechanism for finding the mod JSON file
+                while (!modJsonFile.exists() && retryCount < maxRetries) {
+                    LOGGER.info("Mod JSON file not found: {}. Retrying in 4 seconds...", modJsonFile.getPath());
+                    Thread.sleep(4000); // 4 seconds delay
+                    retryCount++;
+                }
+
+            
                 if (modJsonFile.exists()) {
                     LOGGER.info("Mod JSON file found: {}", modJsonFile.getPath());
                     modifyJsonFile(modJsonFile, mcVersion);
