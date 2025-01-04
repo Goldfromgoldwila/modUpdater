@@ -90,29 +90,40 @@ public class ExtractJson {
         logFileContent(modJsonFile); // Log old file content
         JsonObject jsonObject = readJsonFile(modJsonFile);
         JsonObject depends = getOrCreateDependsObject(jsonObject);
-        
+    
         // Log all changes made to the JSON file
         LOGGER.info("Old JSON data: {}", jsonObject);
         LOGGER.info("Old dependencies: {}", depends);
-
+    
         // Process Minecraft version
         if (depends.has("minecraft")) {
-            String minecraftVersion = depends.get("minecraft").getAsString();
-            String updatedVersion = processMinecraftVersion(minecraftVersion, mcVersion);
-            depends.addProperty("minecraft", updatedVersion);
+            String currentMinecraftVersion = depends.get("minecraft").getAsString();
+            LOGGER.info("Current Minecraft version: {}", currentMinecraftVersion);
+            
+            // Update the Minecraft version to the new version from the frontend
+            depends.addProperty("minecraft", mcVersion);
+            LOGGER.info("Updated Minecraft version from {} to {}", currentMinecraftVersion, mcVersion);
         } else {
             depends.addProperty("minecraft", mcVersion);
+            LOGGER.info("Added Minecraft version: {}", mcVersion);
         }
-            
+    
         // Update Fabric dependencies
         Optional.ofNullable(FABRIC_LOADER_VERSIONS.get(mcVersion))
-                .ifPresent(loaderVersion -> depends.addProperty("fabricloader", loaderVersion));
+                .ifPresent(loaderVersion -> {
+                    String oldLoaderVersion = depends.get("fabricloader") != null ? depends.get("fabricloader").getAsString() : "not set";
+                    depends.addProperty("fabricloader", loaderVersion);
+                    LOGGER.info("Updated Fabric Loader version from {} to {}", oldLoaderVersion, loaderVersion);
+                });
         Optional.ofNullable(FABRIC_API_VERSIONS.get(mcVersion))
-                .ifPresent(apiVersion -> depends.addProperty("fabric-api", apiVersion));
-
-        LOGGER.info("Updated dependencies for Minecraft version: {}", mcVersion);
+                .ifPresent(apiVersion -> {
+                    String oldApiVersion = depends.get("fabric-api") != null ? depends.get("fabric-api").getAsString() : "not set";
+                    depends.addProperty("fabric-api", apiVersion);
+                    LOGGER.info("Updated Fabric API version from {} to {}", oldApiVersion, apiVersion);
+                });
+    
         LOGGER.info("New dependencies: {}", depends);
-
+    
         // Save changes
         saveJsonFile(modJsonFile, jsonObject);
         

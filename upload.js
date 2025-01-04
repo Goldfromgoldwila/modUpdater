@@ -77,7 +77,7 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
     }
 
 
-    fetch('https://modupdater.onrender.com/api/extract')
+    fetch('https://modupdater.onrender.com/api/file')
     .then(response => response.text())
     .then(data => {
         console.log('File content:', data);
