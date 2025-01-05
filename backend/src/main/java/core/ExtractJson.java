@@ -105,6 +105,7 @@ public class ExtractJson {
         LOGGER.info("Old JSON data: {}", jsonObject);
         LOGGER.info("Old dependencies: {}", depends);
     
+        // Replace any existing version or range under "minecraft" with the new version
         if (depends.has("minecraft")) {
             String currentMinecraftVersion = depends.get("minecraft").getAsString();
             LOGGER.info("Current Minecraft version: {}", currentMinecraftVersion);
@@ -139,9 +140,10 @@ public class ExtractJson {
     
         // Save changes
         saveJsonFile(modJsonFile, jsonObject);
-        
+    
         logFileContent(modJsonFile); // Log new file content
     }
+    
 
     private String processMinecraftVersion(String versionString, String newMcVersion) {
         String[] parts = versionString.split(" ");
