@@ -109,7 +109,8 @@ public class ExtractJson {
         if (depends.has("minecraft")) {
             String currentMinecraftVersion = depends.get("minecraft").getAsString();
             LOGGER.info("Current Minecraft version: {}", currentMinecraftVersion);
-    
+            
+            String cleanVersion = processMinecraftVersion(currentMinecraftVersion);
             // Update the Minecraft version to the new version from the frontend
             depends.addProperty("minecraft", mcVersion);
             LOGGER.info("Updated Minecraft version from {} to {}", currentMinecraftVersion, mcVersion);
@@ -145,20 +146,24 @@ public class ExtractJson {
     }
     
 
-    private String processMinecraftVersion(String versionString, String newMcVersion) {
-    // Remove any range indicators (e.g., >=, <=) and extract the exact version
-    String exactVersion = versionString.replaceAll("[><=]", "").trim();
-    String[] parts = exactVersion.split("\\s+");
-    
-    // If there's only one version, use it; otherwise, use the new version
-    if (parts.length == 1) {
-        exactVersion = parts[0];
-    } else {
-        exactVersion = newMcVersion;
-    }
-    
-    LOGGER.info("Extracted exact Minecraft version: {}", exactVersion);
-    return exactVersion;
+    private String processMinecraftVersion(String versionString) {
+        // Remove any whitespace
+        versionString = versionString.trim();
+        
+        // If the version contains a range (e.g., ">=1.20 <=1.20.1")
+        if (versionString.contains(" ")) {
+            // Split by whitespace and get the last version number
+            String[] parts = versionString.split("\\s+");
+            for (int i = parts.length - 1; i >= 0; i--) {
+                String part = parts[i].replaceAll("[^0-9.]", "");
+                if (!part.isEmpty()) {
+                    return part;
+                }
+            }
+        }
+        // For single version with prefix (e.g., ">=1.21")
+        // Remove any non-numeric characters except dots
+        return versionString.replaceAll("[^0-9.]", "");
     }
     
     private JsonObject readJsonFile(File file) throws IOException {
