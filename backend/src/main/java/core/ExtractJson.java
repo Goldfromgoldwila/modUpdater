@@ -105,11 +105,10 @@ public class ExtractJson {
         LOGGER.info("Old JSON data: {}", jsonObject);
         LOGGER.info("Old dependencies: {}", depends);
     
-        // Process Minecraft version
         if (depends.has("minecraft")) {
             String currentMinecraftVersion = depends.get("minecraft").getAsString();
             LOGGER.info("Current Minecraft version: {}", currentMinecraftVersion);
-            
+    
             // Update the Minecraft version to the new version from the frontend
             depends.addProperty("minecraft", mcVersion);
             LOGGER.info("Updated Minecraft version from {} to {}", currentMinecraftVersion, mcVersion);
@@ -117,6 +116,9 @@ public class ExtractJson {
             depends.addProperty("minecraft", mcVersion);
             LOGGER.info("Added Minecraft version: {}", mcVersion);
         }
+    
+        // Log the updated depends object
+        LOGGER.info("Updated depends object: {}", depends);
     
         // Update Fabric dependencies
         Optional.ofNullable(FABRIC_LOADER_VERSIONS.get(mcVersion))
