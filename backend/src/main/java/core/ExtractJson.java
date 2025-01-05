@@ -114,6 +114,7 @@ public class ExtractJson {
             // Update the Minecraft version to the new version from the frontend
             depends.addProperty("minecraft", mcVersion);
             LOGGER.info("Updated Minecraft version from {} to {}", currentMinecraftVersion, mcVersion);
+            LOGGER.info("Clean version: {}", cleanVersion);
         } else {
             depends.addProperty("minecraft", mcVersion);
             LOGGER.info("Added Minecraft version: {}", mcVersion);
