@@ -146,24 +146,19 @@ public class ExtractJson {
     
 
     private String processMinecraftVersion(String versionString, String newMcVersion) {
-        String[] parts = versionString.split(" ");
-        String upperVersion = null;
+    // Remove any range indicators (e.g., >=, <=) and extract the exact version
+    String exactVersion = versionString.replaceAll("[><=]", "").trim();
+    String[] parts = exactVersion.split("\\s+");
     
-        for (String part : parts) {
-            if (part.contains("<=")) {
-                upperVersion = part.replace("<=", "").trim();
-            } else if (part.contains(">=") && part.contains(".")) {
-                // Handle cases like ">=1.20"
-                upperVersion = part.replace(">=", "").trim();
-            }
-        }
-        // If no upper version found, fallback to the newMcVersion or existing version
-        if (upperVersion == null || upperVersion.isEmpty()) {
-            upperVersion = newMcVersion;
-        }
+    // If there's only one version, use it; otherwise, use the new version
+    if (parts.length == 1) {
+        exactVersion = parts[0];
+    } else {
+        exactVersion = newMcVersion;
+    }
     
-        LOGGER.info("Extracted upper Minecraft version: {}", upperVersion);
-        return upperVersion;
+    LOGGER.info("Extracted exact Minecraft version: {}", exactVersion);
+    return exactVersion;
     }
     
     private JsonObject readJsonFile(File file) throws IOException {
