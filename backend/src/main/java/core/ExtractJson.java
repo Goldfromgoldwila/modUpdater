@@ -132,6 +132,7 @@ public class ExtractJson {
                     LOGGER.info("Updated Fabric API version from {} to {}", oldApiVersion, apiVersion);
                 });
     
+        // Log the new dependencies
         LOGGER.info("New dependencies: {}", depends);
     
         // Save changes
