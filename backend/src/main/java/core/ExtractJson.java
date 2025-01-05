@@ -101,20 +101,24 @@ public class ExtractJson {
         JsonObject jsonObject = readJsonFile(modJsonFile);
         JsonObject depends = getOrCreateDependsObject(jsonObject);
     
+        // Log all changes made to the JSON file
         LOGGER.info("Old JSON data: {}", jsonObject);
         LOGGER.info("Old dependencies: {}", depends);
     
-        // Directly update the Minecraft version to the new version from the frontend
+        // Replace any existing version or range under "minecraft" with the new version
         if (depends.has("minecraft")) {
             String currentMinecraftVersion = depends.get("minecraft").getAsString();
             LOGGER.info("Current Minecraft version: {}", currentMinecraftVersion);
-            depends.addProperty("minecraft", mcVersion); // Set the new version
+    
+            // Update the Minecraft version to the new version from the frontend
+            depends.addProperty("minecraft", mcVersion);
             LOGGER.info("Updated Minecraft version from {} to {}", currentMinecraftVersion, mcVersion);
         } else {
             depends.addProperty("minecraft", mcVersion);
             LOGGER.info("Added Minecraft version: {}", mcVersion);
         }
     
+        // Log the updated depends object
         LOGGER.info("Updated depends object: {}", depends);
     
         // Update Fabric dependencies
@@ -131,11 +135,15 @@ public class ExtractJson {
                     LOGGER.info("Updated Fabric API version from {} to {}", oldApiVersion, apiVersion);
                 });
     
+        // Log the new dependencies
         LOGGER.info("New dependencies: {}", depends);
     
+        // Save changes
         saveJsonFile(modJsonFile, jsonObject);
+    
         logFileContent(modJsonFile); // Log new file content
     }
+    
 
     private String processMinecraftVersion(String versionString, String newMcVersion) {
         String[] parts = versionString.split(" ");
