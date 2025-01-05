@@ -195,6 +195,11 @@ public class ExtractJson {
         try (FileWriter writer = new FileWriter(file)) {
             Gson gson = new GsonBuilder().setPrettyPrinting().create();
             gson.toJson(jsonObject, writer);
+            LOGGER.info("Successfully saved updated JSON to file: {}", file.getPath());
+        } catch (IOException e) {
+            LOGGER.error("Error saving JSON file: {}", e.getMessage());
+            throw e;
         }
     }
+    
 }
