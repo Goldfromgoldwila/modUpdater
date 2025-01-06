@@ -77,12 +77,4 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
     }
 
 
-    fetch('https://modupdater.onrender.com/api/file')
-    .then(response => response.text())
-    .then(data => {
-        console.log('File content:', data);
-        // Display the file content in the frontend
-    })
-    .catch(error => console.error('Error fetching file content:', error));
-    
 });

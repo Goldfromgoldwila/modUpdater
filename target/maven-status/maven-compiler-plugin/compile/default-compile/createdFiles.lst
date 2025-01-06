@@ -1,3 +1,4 @@
+core\MinecraftVersionHandler.class
 core\VersionComparator.class
 core\WebConfig$1.class
 core\ModDecompilerService.class

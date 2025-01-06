@@ -20,6 +20,8 @@ public class ExtractJson {
     private static final String DECOMPILED_DIR = "decompiled_mods";
     private static final String MOD_JSON_FILE = "fabric.mod.json";
 
+    private String mcVersion; // Add this line to declare mcVersion
+
     private static final Map<String, String> FABRIC_LOADER_VERSIONS = Map.of(
         "1.20", ">=0.14.21",
         "1.20.1", ">=0.14.21",
@@ -46,6 +48,9 @@ public class ExtractJson {
         "1.21.4", ">=0.92.0"
     );
 
+    private String cleanVersion;
+
+
     public void processMod(String mcVersion) {
         try {
             LOGGER.info("Processing mod for Minecraft version: {}", mcVersion);
@@ -54,16 +59,14 @@ public class ExtractJson {
             if (decompDir != null) {
                 File modJsonFile = new File(decompDir, MOD_JSON_FILE);
                 int retryCount = 0;
-                int maxRetries = 5; // Maximum number of retries
+                int maxRetries = 5;
 
-                    // Retry mechanism for finding the mod JSON file
                 while (!modJsonFile.exists() && retryCount < maxRetries) {
                     LOGGER.info("Mod JSON file not found: {}. Retrying in 4 seconds...", modJsonFile.getPath());
-                    Thread.sleep(4000); // 4 seconds delay
+                    Thread.sleep(4000);
                     retryCount++;
                 }
 
-            
                 if (modJsonFile.exists()) {
                     LOGGER.info("Mod JSON file found: {}", modJsonFile.getPath());
                     modifyJsonFile(modJsonFile, mcVersion);
@@ -72,10 +75,9 @@ public class ExtractJson {
                 }
             } else {
                 LOGGER.error("No decompiled directory found.");
-                // Auto-retry for Missing Directory
                 LOGGER.info("Retrying in 5 seconds...");
-                Thread.sleep(5000); // 5 seconds delay
-                processMod(mcVersion); // Retry
+                Thread.sleep(5000);
+                processMod(mcVersion);
             }
         } catch (Exception e) {
             LOGGER.error("Error processing mod: {}", e.getMessage(), e);
@@ -97,63 +99,55 @@ public class ExtractJson {
     }
 
     private void modifyJsonFile(File modJsonFile, String mcVersion) throws IOException {
-        logFileContent(modJsonFile); // Log old file content
+        logFileContent(modJsonFile);
         JsonObject jsonObject = readJsonFile(modJsonFile);
         JsonObject depends = getOrCreateDependsObject(jsonObject);
-    
-        // Log all changes made to the JSON file
+
         LOGGER.info("Old JSON data: {}", jsonObject);
         LOGGER.info("Old dependencies: {}", depends);
-    
-        // Replace any existing version or range under "minecraft" with the new version
+
         if (depends.has("minecraft")) {
             String currentMinecraftVersion = depends.get("minecraft").getAsString();
             LOGGER.info("Current Minecraft version: {}", currentMinecraftVersion);
-            
-            String cleanVersion = processMinecraftVersion(currentMinecraftVersion);
-            // Update the Minecraft version to the new version from the frontend
+
+            this.cleanVersion = processMinecraftVersion(currentMinecraftVersion);
+            this.mcVersion = mcVersion;
+
             depends.addProperty("minecraft", mcVersion);
             LOGGER.info("Updated Minecraft version from {} to {}", currentMinecraftVersion, mcVersion);
-            LOGGER.info("Clean version: {}", cleanVersion);
+            LOGGER.info("Clean version: {}", this.cleanVersion);
         } else {
             depends.addProperty("minecraft", mcVersion);
             LOGGER.info("Added Minecraft version: {}", mcVersion);
         }
-    
-        // Log the updated depends object
+
         LOGGER.info("Updated depends object: {}", depends);
-    
-        // Update Fabric dependencies
-        Optional.ofNullable(FABRIC_LOADER_VERSIONS.get(mcVersion))
-                .ifPresent(loaderVersion -> {
-                    String oldLoaderVersion = depends.get("fabricloader") != null ? depends.get("fabricloader").getAsString() : "not set";
-                    depends.addProperty("fabricloader", loaderVersion);
-                    LOGGER.info("Updated Fabric Loader version from {} to {}", oldLoaderVersion, loaderVersion);
-                });
-        Optional.ofNullable(FABRIC_API_VERSIONS.get(mcVersion))
-                .ifPresent(apiVersion -> {
-                    String oldApiVersion = depends.get("fabric-api") != null ? depends.get("fabric-api").getAsString() : "not set";
-                    depends.addProperty("fabric-api", apiVersion);
-                    LOGGER.info("Updated Fabric API version from {} to {}", oldApiVersion, apiVersion);
-                });
-    
-        // Log the new dependencies
+
+   // Update Fabric dependencies
+        String loaderVersion = FABRIC_LOADER_VERSIONS.get(mcVersion);
+        if (loaderVersion != null) {
+            String oldLoaderVersion = depends.has("fabricloader") ? depends.get("fabricloader").getAsString() : "not set";
+            depends.addProperty("fabricloader", loaderVersion);
+            LOGGER.info("Updated Fabric Loader version from {} to {}", oldLoaderVersion, loaderVersion);
+        }
+
+        String apiVersion = FABRIC_API_VERSIONS.get(mcVersion);
+        if (apiVersion != null) {
+            String oldApiVersion = depends.has("fabric-api") ? depends.get("fabric-api").getAsString() : "not set";
+            depends.addProperty("fabric-api", apiVersion);
+            LOGGER.info("Updated Fabric API version from {} to {}", oldApiVersion, apiVersion);
+        }
+
         LOGGER.info("New dependencies: {}", depends);
-    
-        // Save changes
+
         saveJsonFile(modJsonFile, jsonObject);
-    
-        logFileContent(modJsonFile); // Log new file content
+        logFileContent(modJsonFile);
     }
-    
 
     private String processMinecraftVersion(String versionString) {
-        // Remove any whitespace
         versionString = versionString.trim();
-        
-        // If the version contains a range (e.g., ">=1.20 <=1.20.1")
+
         if (versionString.contains(" ")) {
-            // Split by whitespace and get the last version number
             String[] parts = versionString.split("\\s+");
             for (int i = parts.length - 1; i >= 0; i--) {
                 String part = parts[i].replaceAll("[^0-9.]", "");
@@ -162,11 +156,9 @@ public class ExtractJson {
                 }
             }
         }
-        // For single version with prefix (e.g., ">=1.21")
-        // Remove any non-numeric characters except dots
         return versionString.replaceAll("[^0-9.]", "");
     }
-    
+
     private JsonObject readJsonFile(File file) throws IOException {
         try (FileReader reader = new FileReader(file)) {
             return JsonParser.parseReader(reader).getAsJsonObject();
@@ -202,5 +194,22 @@ public class ExtractJson {
             throw e;
         }
     }
-    
+
+    // Getter for cleanVersion
+    public String getCleanVersion() {
+        return cleanVersion;
+    }
+
+    // Getter for mcVersion
+    public String getMcVersion() {
+        return mcVersion;
+    }
+
+    private void triggerVersionComparison() {
+        LOGGER.info("Triggering comparison between cleanVersion: {} and mcVersion: {}", cleanVersion, mcVersion);
+        MinecraftVersionHandler versionHandler = new MinecraftVersionHandler();
+        versionHandler.compareMinecraftVersions(cleanVersion, mcVersion);
+    }
+
+
 }
