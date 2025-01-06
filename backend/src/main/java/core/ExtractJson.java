@@ -123,7 +123,7 @@ public class ExtractJson {
 
         LOGGER.info("Updated depends object: {}", depends);
 
-   // Update Fabric dependencies
+       // Update Fabric dependencies
         String loaderVersion = FABRIC_LOADER_VERSIONS.get(mcVersion);
         if (loaderVersion != null) {
             String oldLoaderVersion = depends.has("fabricloader") ? depends.get("fabricloader").getAsString() : "not set";
@@ -142,6 +142,9 @@ public class ExtractJson {
 
         saveJsonFile(modJsonFile, jsonObject);
         logFileContent(modJsonFile);
+
+        triggerVersionComparison();
+        LOGGER.info("Triggering version comparison between cleanVersion: {} and mcVersion: {}", cleanVersion, mcVersion);
     }
 
     private String processMinecraftVersion(String versionString) {
