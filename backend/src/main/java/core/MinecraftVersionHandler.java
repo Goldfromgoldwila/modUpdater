@@ -23,23 +23,29 @@ public class MinecraftVersionHandler {
      */
     public void compareMinecraftVersions(String cleanVersion, String mcVersion) {
         try {
+            // Log and check the path for the clean version
             File oldVersionDir = findVersionDirectory(cleanVersion);
-            File newVersionDir = findVersionDirectory(mcVersion);
-
-            if (oldVersionDir != null && newVersionDir != null) {
-                // Step 2: Find differences between the versions
-                List<String> differences = findDifferences(oldVersionDir, newVersionDir);
-                LOGGER.info("Differences found: {}", differences);
-
-                // Step 5: Save the differences in a file
-                saveDifferences(differences);
-            } else {
-                LOGGER.error("Failed to find directories for the given versions.");
+            if (oldVersionDir == null) {
+                LOGGER.error("Failed to find directory for clean version: {}", cleanVersion);
+                return;
             }
+    
+            // Log and check the path for the mc version
+            File newVersionDir = findVersionDirectory(mcVersion);
+            if (newVersionDir == null) {
+                LOGGER.error("Failed to find directory for mc version: {}", mcVersion);
+                return;
+            }
+    
+            // Both directories are found, proceed to find differences
+            LOGGER.info("Proceeding with comparison between cleanVersion: {} and mcVersion: {}", cleanVersion, mcVersion);
+            List<String> differences = findDifferences(oldVersionDir, newVersionDir);
+            LOGGER.info("Differences found: {}", differences);
         } catch (Exception e) {
             LOGGER.error("Error while comparing versions: {}", e.getMessage(), e);
         }
     }
+    
 
     /**
      * Finds the directory for a specific Minecraft version.
@@ -50,15 +56,20 @@ public class MinecraftVersionHandler {
     private File findVersionDirectory(String version) {
         try {
             Path versionPath = Paths.get(DECOMPILED_DIR, version);
+            LOGGER.info("Checking directory for version: {} at path: {}", version, versionPath.toAbsolutePath());
+    
             if (Files.exists(versionPath)) {
                 LOGGER.info("Found directory for version: {}", version);
                 return versionPath.toFile();
+            } else {
+                LOGGER.error("Directory not found for version: {} at path: {}", version, versionPath.toAbsolutePath());
             }
         } catch (Exception e) {
-            LOGGER.error("Error finding version directory: {}", e.getMessage());
+            LOGGER.error("Error finding version directory for version {}: {}", version, e.getMessage());
         }
         return null;
     }
+    
 
     /**
      * Finds differences between two decompiled Minecraft versions.
