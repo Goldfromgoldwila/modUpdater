@@ -131,19 +131,31 @@ public class MinecraftVersionHandler {
      * @param differences The list to store differences.
      */
     private void compareFileContents(Path oldFile, Path newFile, List<String> differences) {
-        // Use diff tools or AST analysis to find deeper differences in code structure
-        // For simplicity, we'll compare file content line by line
         try {
-            List<String> oldLines = Files.readAllLines(oldFile);
-            List<String> newLines = Files.readAllLines(newFile);
-
-            if (!oldLines.equals(newLines)) {
-                differences.add("Modified: " + oldFile.toString());
+            if (isBinaryFile(oldFile) || isBinaryFile(newFile)) {
+                // Compare binary files by their byte content
+                if (Files.mismatch(oldFile, newFile) != -1) {
+                    differences.add("Modified (binary): " + oldFile.toString());
+                }
+            } else {
+                // Compare text files line by line
+                List<String> oldLines = Files.readAllLines(oldFile);
+                List<String> newLines = Files.readAllLines(newFile);
+    
+                if (!oldLines.equals(newLines)) {
+                    differences.add("Modified: " + oldFile.toString());
+                }
             }
         } catch (IOException e) {
             LOGGER.error("Error reading files: {}", e.getMessage());
         }
     }
+    
+    private boolean isBinaryFile(Path file) throws IOException {
+        String mimeType = Files.probeContentType(file);
+        return mimeType != null && !mimeType.startsWith("text");
+    }
+    
 
     /**
      * Saves the list of differences to a file.
