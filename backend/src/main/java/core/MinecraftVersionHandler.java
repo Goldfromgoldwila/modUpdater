@@ -6,8 +6,11 @@ import org.springframework.stereotype.Component;
 
 import java.io.*;
 import java.nio.file.*;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.function.Consumer;
 
 @Component
 public class MinecraftVersionHandler {
@@ -15,29 +18,20 @@ public class MinecraftVersionHandler {
     private static final Logger LOGGER = LoggerFactory.getLogger(MinecraftVersionHandler.class);
     private static final String DECOMPILED_DIR = "versions";
 
-    /**
-     * Step 1: Load and compare Minecraft versions.
-     *
-     * @param cleanVersion The older Minecraft version.
-     * @param mcVersion    The newer Minecraft version.
-     */
     public void compareMinecraftVersions(String cleanVersion, String mcVersion) {
         try {
-            // Log and check the path for the clean version
             File oldVersionDir = findVersionDirectory(cleanVersion);
             if (oldVersionDir == null) {
                 LOGGER.error("Failed to find directory for clean version: {}", cleanVersion);
                 return;
             }
-    
-            // Log and check the path for the mc version
+
             File newVersionDir = findVersionDirectory(mcVersion);
             if (newVersionDir == null) {
                 LOGGER.error("Failed to find directory for mc version: {}", mcVersion);
                 return;
             }
-    
-            // Both directories are found, proceed to find differences
+
             LOGGER.info("Proceeding with comparison between cleanVersion: {} and mcVersion: {}", cleanVersion, mcVersion);
             List<String> differences = findDifferences(oldVersionDir, newVersionDir);
             LOGGER.info("Differences found: {}", differences);
@@ -45,39 +39,24 @@ public class MinecraftVersionHandler {
             LOGGER.error("Error while comparing versions: {}", e.getMessage(), e);
         }
     }
-    
 
-    /**
-     * Finds the directory for a specific Minecraft version.
-     *
-     * @param version The version to find.
-     * @return The directory file.
-     */
     private File findVersionDirectory(String version) {
         try {
             Path versionPath = Paths.get(DECOMPILED_DIR, version);
-            LOGGER.info("Checking directory for version: {} at path: {}", version, versionPath.toAbsolutePath());
-    
+            LOGGER.info("Checking directory for version: {} at Path: {}", version, versionPath.toAbsolutePath());
+
             if (Files.exists(versionPath)) {
                 LOGGER.info("Found directory for version: {}", version);
                 return versionPath.toFile();
             } else {
-                LOGGER.error("Directory not found for version: {} at path: {}", version, versionPath.toAbsolutePath());
+                LOGGER.error("Directory not found for version: {} at Path: {}", version, versionPath.toAbsolutePath());
             }
         } catch (Exception e) {
             LOGGER.error("Error finding version directory for version {}: {}", version, e.getMessage());
         }
         return null;
     }
-    
 
-    /**
-     * Finds differences between two decompiled Minecraft versions.
-     *
-     * @param oldVersionDir The older version directory.
-     * @param newVersionDir The newer version directory.
-     * @return A list of differences.
-     */
     private List<String> findDifferences(File oldVersionDir, File newVersionDir) {
         List<String> differences = new ArrayList<>();
 
@@ -85,7 +64,6 @@ public class MinecraftVersionHandler {
             Map<String, Path> oldFiles = mapFiles(oldVersionDir);
             Map<String, Path> newFiles = mapFiles(newVersionDir);
 
-            // Compare file structures
             Set<String> allKeys = new HashSet<>();
             allKeys.addAll(oldFiles.keySet());
             allKeys.addAll(newFiles.keySet());
@@ -96,7 +74,6 @@ public class MinecraftVersionHandler {
                 } else if (!oldFiles.containsKey(key)) {
                     differences.add("Added: " + key);
                 } else {
-                    // If the file exists in both, compare content for methods, fields, etc.
                     compareFileContents(oldFiles.get(key), newFiles.get(key), differences);
                 }
             }
@@ -107,61 +84,56 @@ public class MinecraftVersionHandler {
         return differences;
     }
 
-    /**
-     * Maps all files in a directory to their paths relative to the directory root.
-     *
-     * @param rootDir The root directory.
-     * @return A map of relative paths to file paths.
-     * @throws IOException If an I/O error occurs.
-     */
     private Map<String, Path> mapFiles(File rootDir) throws IOException {
-        return Files.walk(rootDir.toPath())
-                .filter(Files::isRegularFile)
-                .collect(Collectors.toMap(
-                        path -> rootDir.toPath().relativize(path).toString(),
-                        path -> path
-                ));
+        Map<String, Path> allFiles = new HashMap<>();
+        Files.walk(rootDir.toPath())
+            .filter(Files::isRegularFile)
+            .forEach(handleCheckedException(Path -> {
+                String relativePath = rootDir.toPath().relativize(Path).toString();
+                allFiles.put(relativePath, Path);
+            }));
+        return allFiles;
     }
 
-    /**
-     * Compares the contents of two files for differences in class definitions, methods, and fields.
-     *
-     * @param oldFile The old version of the file.
-     * @param newFile The new version of the file.
-     * @param differences The list to store differences.
-     */
+    private <T> Consumer<T> handleCheckedException(CheckedConsumer<T> consumer) {
+        return t -> {
+            try {
+                consumer.accept(t);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        };
+    }
+
+    @FunctionalInterface
+    private interface CheckedConsumer<T> {
+        void accept(T t) throws IOException;
+    }
+
     private void compareFileContents(Path oldFile, Path newFile, List<String> differences) {
         try {
             if (isBinaryFile(oldFile) || isBinaryFile(newFile)) {
-                // Compare binary files by their byte content
                 if (Files.mismatch(oldFile, newFile) != -1) {
                     differences.add("Modified (binary): " + oldFile.toString());
                 }
             } else {
-                // Compare text files line by line
                 List<String> oldLines = Files.readAllLines(oldFile);
                 List<String> newLines = Files.readAllLines(newFile);
-    
+
                 if (!oldLines.equals(newLines)) {
                     differences.add("Modified: " + oldFile.toString());
                 }
             }
         } catch (IOException e) {
-            LOGGER.error("Error reading files: {}", e.getMessage());
+            LOGGER.error("Error reading files: {}. File: {}", e.getMessage(), oldFile.toString());
         }
     }
-    
+
     private boolean isBinaryFile(Path file) throws IOException {
         String mimeType = Files.probeContentType(file);
         return mimeType != null && !mimeType.startsWith("text");
     }
-    
 
-    /**
-     * Saves the list of differences to a file.
-     *
-     * @param differences The list of differences.
-     */
     private void saveDifferences(List<String> differences) {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter("differences.txt"))) {
             for (String difference : differences) {
@@ -171,6 +143,65 @@ public class MinecraftVersionHandler {
             LOGGER.info("Differences saved to differences.txt");
         } catch (IOException e) {
             LOGGER.error("Error saving differences: {}", e.getMessage());
+        }
+    }
+
+    private Map<String, String> findPotentialRenames(List<Path> removedFiles, List<Path> addedFiles) {
+        Map<String, String> renames = new HashMap<>();
+
+        for (Path removed : removedFiles) {
+            for (Path added : addedFiles) {
+                if (areFilesSimilar(removed, added)) {
+                    renames.put(removed.toString(), added.toString());
+                    break;
+                }
+            }
+        }
+
+        return renames;
+    }
+
+    private boolean areFilesSimilar(Path file1, Path file2) {
+        try {
+            String hash1 = Files.isRegularFile(file1) ? computeHash(file1) : null;
+            String hash2 = Files.isRegularFile(file2) ? computeHash(file2) : null;
+            return hash1 != null && hash1.equals(hash2);
+        } catch (IOException | NoSuchAlgorithmException e) {
+            LOGGER.error("Error comparing files for similarity: {}", e.getMessage());
+        }
+        return false;
+    }
+
+    private String computeHash(Path file) throws IOException, NoSuchAlgorithmException {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] fileBytes = Files.readAllBytes(file);
+        byte[] hashBytes = digest.digest(fileBytes);
+        return Base64.getEncoder().encodeToString(hashBytes);
+    }
+    
+    
+    private void generateReport(List<String> differences, Map<String, String> renames) {
+        try (BufferedWriter writer = Files.newBufferedWriter(Paths.get("differences_report.txt"))) {
+            writer.write("Differences Report\n\n");
+            writer.write("Added Files:\n");
+            differences.stream().filter(d -> d.startsWith("Added")).forEach(diff -> writeLine(writer, diff));
+            writer.write("\nRemoved Files:\n");
+            differences.stream().filter(d -> d.startsWith("Removed")).forEach(diff -> writeLine(writer, diff));
+            writer.write("\nRenamed Files:\n");
+            renames.forEach((oldName, newName) -> writeLine(writer, oldName + " -> " + newName));
+            writer.write("\nModified Files:\n");
+            differences.stream().filter(d -> d.startsWith("Modified")).forEach(diff -> writeLine(writer, diff));
+        } catch (IOException e) {
+            LOGGER.error("Error generating report: {}", e.getMessage());
+        }
+    }
+
+    private void writeLine(BufferedWriter writer, String line) {
+        try {
+            writer.write(line);
+            writer.newLine();
+        } catch (IOException e) {
+            LOGGER.error("Error writing line to report: {}", e.getMessage());
         }
     }
 }
