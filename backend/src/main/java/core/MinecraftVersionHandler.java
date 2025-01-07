@@ -11,8 +11,10 @@ import java.security.NoSuchAlgorithmException;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.function.Consumer;
+import net.querz.nbt.io.NBTInputStream;
+import net.querz.nbt.tag.CompoundTag;
 
-@Component
+
 public class MinecraftVersionHandler {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(MinecraftVersionHandler.class);
@@ -109,17 +111,26 @@ public class MinecraftVersionHandler {
     private interface CheckedConsumer<T> {
         void accept(T t) throws IOException;
     }
-
     private void compareFileContents(Path oldFile, Path newFile, List<String> differences) {
         try {
-            if (isBinaryFile(oldFile) || isBinaryFile(newFile)) {
+            String oldFileName = oldFile.getFileName().toString();
+            String newFileName = newFile.getFileName().toString();
+    
+            if (oldFileName.endsWith(".class") || newFileName.endsWith(".class")) {
+                // Binary comparison for .class files
                 if (Files.mismatch(oldFile, newFile) != -1) {
                     differences.add("Modified (binary): " + oldFile.toString());
                 }
+            } else if (oldFileName.endsWith(".nbt") || newFileName.endsWith(".nbt")) {
+                // Special handling for .nbt files using an NBT library
+                if (!compareNbtFiles(oldFile, newFile)) {
+                    differences.add("Modified (NBT): " + oldFile.toString());
+                }
             } else {
+                // Text comparison for other files
                 List<String> oldLines = Files.readAllLines(oldFile);
                 List<String> newLines = Files.readAllLines(newFile);
-
+    
                 if (!oldLines.equals(newLines)) {
                     differences.add("Modified: " + oldFile.toString());
                 }
@@ -129,11 +140,22 @@ public class MinecraftVersionHandler {
         }
     }
 
-    private boolean isBinaryFile(Path file) throws IOException {
-        String mimeType = Files.probeContentType(file);
-        return mimeType != null && !mimeType.startsWith("text");
+    private boolean compareNbtFiles(Path oldFile, Path newFile) {
+        try (NBTInputStream oldNbtStream = new NBTInputStream(new FileInputStream(oldFile.toFile()));
+             NBTInputStream newNbtStream = new NBTInputStream(new FileInputStream(newFile.toFile()))) {
+            
+            // Read the named tags with explicit type declaration
+            net.querz.nbt.io.NamedTag oldNamedTag = oldNbtStream.readTag(1024);
+            net.querz.nbt.io.NamedTag newNamedTag = newNbtStream.readTag(1024);
+            
+            // Compare the tag names and their contents
+            return oldNamedTag.getName().equals(newNamedTag.getName()) &&
+                   oldNamedTag.getTag().equals(newNamedTag.getTag());
+        } catch (IOException e) {
+            LOGGER.error("Error reading NBT files: {}", e.getMessage());
+            return false;
+        }
     }
-
     private void saveDifferences(List<String> differences) {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter("differences.txt"))) {
             for (String difference : differences) {
