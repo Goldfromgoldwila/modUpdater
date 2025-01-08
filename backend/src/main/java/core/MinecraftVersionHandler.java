@@ -179,43 +179,85 @@ public class MinecraftVersionHandler {
             LOGGER.warn("Invalid NBT file name detected: {} or {}", oldFile.getFileName(), newFile.getFileName());
             return false;
         }
-
-        try (NBTInputStream oldNbtStream = new NBTInputStream(new FileInputStream(oldFile.toFile()));
-             NBTInputStream newNbtStream = new NBTInputStream(new FileInputStream(newFile.toFile()))) {
+    
+        try (NBTInputStream oldNbtStream = new NBTInputStream(new BufferedInputStream(new FileInputStream(oldFile.toFile())));
+             NBTInputStream newNbtStream = new NBTInputStream(new BufferedInputStream(new FileInputStream(newFile.toFile())))) {
             
-            // Read with validation
-            net.querz.nbt.io.NamedTag oldNamedTag = readAndValidateNbtTag(oldNbtStream, oldFile);
-            if (oldNamedTag == null) return false;
+            // Increase max depth and add buffering for larger files
+            net.querz.nbt.io.NamedTag oldNamedTag = readAndValidateNbtTag(oldNbtStream, oldFile, 8192);
+            if (oldNamedTag == null) {
+                LOGGER.error("Failed to read old NBT file: {}", oldFile);
+                return false;
+            }
             
-            net.querz.nbt.io.NamedTag newNamedTag = readAndValidateNbtTag(newNbtStream, newFile);
-            if (newNamedTag == null) return false;
+            net.querz.nbt.io.NamedTag newNamedTag = readAndValidateNbtTag(newNbtStream, newFile, 8192);
+            if (newNamedTag == null) {
+                LOGGER.error("Failed to read new NBT file: {}", newFile);
+                return false;
+            }
             
-            return oldNamedTag.getName().equals(newNamedTag.getName()) &&
-                   oldNamedTag.getTag().equals(newNamedTag.getTag());
+            boolean namesEqual = oldNamedTag.getName().equals(newNamedTag.getName());
+            boolean tagsEqual = oldNamedTag.getTag().equals(newNamedTag.getTag());
+            
+            if (!namesEqual || !tagsEqual) {
+                LOGGER.debug("NBT comparison failed - Names equal: {}, Tags equal: {}", namesEqual, tagsEqual);
+            }
+            
+            return namesEqual && tagsEqual;
         } catch (IOException e) {
-            LOGGER.error("Error reading NBT files: {} - {}", e.getMessage(), e.getClass().getSimpleName());
+            LOGGER.error("Error reading NBT files: {} - {} - Stack trace: {}", 
+                e.getMessage(), 
+                e.getClass().getSimpleName(),
+                Arrays.toString(e.getStackTrace()));
             return false;
         }
     }
-
+    
     private boolean isValidNbtFile(Path file) {
-        String fileName = file.getFileName().toString().toLowerCase();
-        return fileName.endsWith(".nbt") && 
-               Files.exists(file) && 
-               Files.isRegularFile(file) &&
-               Files.isReadable(file);
-    }
-
-    private net.querz.nbt.io.NamedTag readAndValidateNbtTag(NBTInputStream stream, Path file) {
         try {
-            net.querz.nbt.io.NamedTag tag = stream.readTag(1024);
-            if (tag == null || tag.getTag() == null) {
-                LOGGER.error("Invalid NBT data structure in file: {}", file);
+            String fileName = file.getFileName().toString().toLowerCase();
+            boolean isValid = fileName.endsWith(".nbt") && 
+                             Files.exists(file) && 
+                             Files.isRegularFile(file) &&
+                             Files.isReadable(file) &&
+                             Files.size(file) > 0;
+            
+            if (!isValid) {
+                LOGGER.warn("NBT file validation failed for {}: exists={}, isFile={}, isReadable={}, size={}",
+                    file,
+                    Files.exists(file),
+                    Files.isRegularFile(file),
+                    Files.isReadable(file),
+                    Files.size(file));
+            }
+            return isValid;
+        } catch (IOException e) {
+            LOGGER.error("Error validating NBT file {}: {}", file, e.getMessage());
+            return false;
+        }
+    }
+    
+    private net.querz.nbt.io.NamedTag readAndValidateNbtTag(NBTInputStream stream, Path file, int maxDepth) {
+        try {
+            net.querz.nbt.io.NamedTag tag = stream.readTag(maxDepth);
+            if (tag == null) {
+                LOGGER.error("Null tag read from NBT file: {}", file);
                 return null;
             }
+            if (tag.getTag() == null) {
+                LOGGER.error("Null inner tag in NBT file: {}", file);
+                return null;
+            }
+            LOGGER.debug("Successfully read NBT tag from {}: name={}, tag type={}", 
+                file,
+                tag.getName(),
+                tag.getTag().getClass().getSimpleName());
             return tag;
         } catch (IOException e) {
-            LOGGER.error("Failed to read NBT data from {}: {}", file, e.getMessage());
+            LOGGER.error("Failed to read NBT data from {}: {} - Stack trace: {}", 
+                file, 
+                e.getMessage(),
+                Arrays.toString(e.getStackTrace()));
             return null;
         }
     }
