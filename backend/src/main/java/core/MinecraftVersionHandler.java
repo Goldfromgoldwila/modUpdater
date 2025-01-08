@@ -3,7 +3,6 @@ package core;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
-
 import java.io.*;
 import java.nio.file.*;
 import java.security.MessageDigest;
@@ -13,10 +12,11 @@ import java.util.stream.Collectors;
 import java.util.function.Consumer;
 import net.querz.nbt.io.NBTInputStream;
 import net.querz.nbt.tag.CompoundTag;
-
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.awt.Color;
 
 public class MinecraftVersionHandler {
-
     private static final Logger LOGGER = LoggerFactory.getLogger(MinecraftVersionHandler.class);
     private static final String DECOMPILED_DIR = "versions";
 
@@ -90,9 +90,9 @@ public class MinecraftVersionHandler {
         Map<String, Path> allFiles = new HashMap<>();
         Files.walk(rootDir.toPath())
             .filter(Files::isRegularFile)
-            .forEach(handleCheckedException(Path -> {
-                String relativePath = rootDir.toPath().relativize(Path).toString();
-                allFiles.put(relativePath, Path);
+            .forEach(handleCheckedException(path -> {
+                String relativePath = rootDir.toPath().relativize(path).toString();
+                allFiles.put(relativePath, path);
             }));
         return allFiles;
     }
@@ -111,26 +111,27 @@ public class MinecraftVersionHandler {
     private interface CheckedConsumer<T> {
         void accept(T t) throws IOException;
     }
+
     private void compareFileContents(Path oldFile, Path newFile, List<String> differences) {
         try {
             String oldFileName = oldFile.getFileName().toString();
             String newFileName = newFile.getFileName().toString();
-    
-            if (oldFileName.endsWith(".class") || newFileName.endsWith(".class")) {
-                // Binary comparison for .class files
+
+            if (oldFileName.endsWith(".png") || newFileName.endsWith(".png")) {
+                if (!comparePngFiles(oldFile, newFile)) {
+                    differences.add("Modified (PNG): " + oldFile.toString());
+                }
+            } else if (oldFileName.endsWith(".class") || newFileName.endsWith(".class")) {
                 if (Files.mismatch(oldFile, newFile) != -1) {
                     differences.add("Modified (binary): " + oldFile.toString());
                 }
             } else if (oldFileName.endsWith(".nbt") || newFileName.endsWith(".nbt")) {
-                // Special handling for .nbt files using an NBT library
                 if (!compareNbtFiles(oldFile, newFile)) {
                     differences.add("Modified (NBT): " + oldFile.toString());
                 }
             } else {
-                // Text comparison for other files
                 List<String> oldLines = Files.readAllLines(oldFile);
                 List<String> newLines = Files.readAllLines(newFile);
-    
                 if (!oldLines.equals(newLines)) {
                     differences.add("Modified: " + oldFile.toString());
                 }
@@ -140,15 +141,40 @@ public class MinecraftVersionHandler {
         }
     }
 
+    private boolean comparePngFiles(Path oldFile, Path newFile) {
+        try {
+            BufferedImage oldImage = ImageIO.read(oldFile.toFile());
+            BufferedImage newImage = ImageIO.read(newFile.toFile());
+            
+            if (oldImage.getWidth() != newImage.getWidth() || oldImage.getHeight() != newImage.getHeight()) {
+                return false;
+            }
+            
+            for (int y = 0; y < oldImage.getHeight(); y++) {
+                for (int x = 0; x < oldImage.getWidth(); x++) {
+                    if (!colorsAreEqual(new Color(oldImage.getRGB(x, y)), new Color(newImage.getRGB(x, y)))) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        } catch (IOException e) {
+            LOGGER.error("Error reading PNG files: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean colorsAreEqual(Color color1, Color color2) {
+        return color1.getRGB() == color2.getRGB();
+    }
+
     private boolean compareNbtFiles(Path oldFile, Path newFile) {
         try (NBTInputStream oldNbtStream = new NBTInputStream(new FileInputStream(oldFile.toFile()));
              NBTInputStream newNbtStream = new NBTInputStream(new FileInputStream(newFile.toFile()))) {
             
-            // Read the named tags with explicit type declaration
             net.querz.nbt.io.NamedTag oldNamedTag = oldNbtStream.readTag(1024);
             net.querz.nbt.io.NamedTag newNamedTag = newNbtStream.readTag(1024);
             
-            // Compare the tag names and their contents
             return oldNamedTag.getName().equals(newNamedTag.getName()) &&
                    oldNamedTag.getTag().equals(newNamedTag.getTag());
         } catch (IOException e) {
@@ -156,6 +182,7 @@ public class MinecraftVersionHandler {
             return false;
         }
     }
+
     private void saveDifferences(List<String> differences) {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter("differences.txt"))) {
             for (String difference : differences) {
@@ -170,7 +197,6 @@ public class MinecraftVersionHandler {
 
     private Map<String, String> findPotentialRenames(List<Path> removedFiles, List<Path> addedFiles) {
         Map<String, String> renames = new HashMap<>();
-
         for (Path removed : removedFiles) {
             for (Path added : addedFiles) {
                 if (areFilesSimilar(removed, added)) {
@@ -179,7 +205,6 @@ public class MinecraftVersionHandler {
                 }
             }
         }
-
         return renames;
     }
 
@@ -200,8 +225,7 @@ public class MinecraftVersionHandler {
         byte[] hashBytes = digest.digest(fileBytes);
         return Base64.getEncoder().encodeToString(hashBytes);
     }
-    
-    
+
     private void generateReport(List<String> differences, Map<String, String> renames) {
         try (BufferedWriter writer = Files.newBufferedWriter(Paths.get("differences_report.txt"))) {
             writer.write("Differences Report\n\n");
