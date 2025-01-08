@@ -111,45 +111,49 @@ public class MinecraftVersionHandler {
     private interface CheckedConsumer<T> {
         void accept(T t) throws IOException;
     }
-
     private void compareFileContents(Path oldFile, Path newFile, List<String> differences) {
         try {
             String oldFileName = oldFile.getFileName().toString();
             String newFileName = newFile.getFileName().toString();
-
+    
             if (oldFileName.endsWith(".png") || newFileName.endsWith(".png")) {
                 if (!comparePngFiles(oldFile, newFile)) {
-                    differences.add("Modified (PNG): " + oldFile.toString());
+                    differences.add("Modified (PNG): " + oldFile.toString() + " vs. " + newFile.toString());
                 }
             } else if (oldFileName.endsWith(".class") || newFileName.endsWith(".class")) {
                 if (Files.mismatch(oldFile, newFile) != -1) {
-                    differences.add("Modified (binary): " + oldFile.toString());
+                    differences.add("Modified (binary): " + oldFile.toString() + " vs. " + newFile.toString());
                 }
             } else if (oldFileName.endsWith(".nbt") || newFileName.endsWith(".nbt")) {
                 if (!compareNbtFiles(oldFile, newFile)) {
-                    differences.add("Modified (NBT): " + oldFile.toString());
+                    differences.add("Modified (NBT): " + oldFile.toString() + " vs. " + newFile.toString());
                 }
             } else {
                 List<String> oldLines = Files.readAllLines(oldFile);
                 List<String> newLines = Files.readAllLines(newFile);
                 if (!oldLines.equals(newLines)) {
-                    differences.add("Modified: " + oldFile.toString());
+                    differences.add("Modified: " + oldFile.toString() + " vs. " + newFile.toString());
                 }
             }
         } catch (IOException e) {
-            LOGGER.error("Error reading files: {}. File: {}", e.getMessage(), oldFile.toString());
+            LOGGER.error("Error reading files: {}. Old File: {}, New File: {}", e.getMessage(), oldFile.toString(), newFile.toString());
         }
     }
-
+    
     private boolean comparePngFiles(Path oldFile, Path newFile) {
         try {
             BufferedImage oldImage = ImageIO.read(oldFile.toFile());
             BufferedImage newImage = ImageIO.read(newFile.toFile());
-            
+    
+            if (oldImage == null || newImage == null) {
+                LOGGER.error("Failed to read one of the PNG files: Old File: {}, New File: {}", oldFile.toString(), newFile.toString());
+                return false;
+            }
+    
             if (oldImage.getWidth() != newImage.getWidth() || oldImage.getHeight() != newImage.getHeight()) {
                 return false;
             }
-            
+    
             for (int y = 0; y < oldImage.getHeight(); y++) {
                 for (int x = 0; x < oldImage.getWidth(); x++) {
                     if (!colorsAreEqual(new Color(oldImage.getRGB(x, y)), new Color(newImage.getRGB(x, y)))) {
@@ -159,15 +163,15 @@ public class MinecraftVersionHandler {
             }
             return true;
         } catch (IOException e) {
-            LOGGER.error("Error reading PNG files: {}", e.getMessage());
+            LOGGER.error("Error reading PNG files: Old File: {}, New File: {}, Error: {}", oldFile.toString(), newFile.toString(), e.getMessage());
             return false;
         }
     }
-
+    
     private boolean colorsAreEqual(Color color1, Color color2) {
         return color1.getRGB() == color2.getRGB();
     }
-
+    
     private boolean compareNbtFiles(Path oldFile, Path newFile) {
         try (NBTInputStream oldNbtStream = new NBTInputStream(new FileInputStream(oldFile.toFile()));
              NBTInputStream newNbtStream = new NBTInputStream(new FileInputStream(newFile.toFile()))) {
