@@ -173,20 +173,52 @@ public class MinecraftVersionHandler {
     }
     
     private boolean compareNbtFiles(Path oldFile, Path newFile) {
+        LOGGER.info("Comparing NBT files: {} and {}", oldFile.getFileName(), newFile.getFileName());
+        // Validate file names first
+        if (!isValidNbtFile(oldFile) || !isValidNbtFile(newFile)) {
+            LOGGER.warn("Invalid NBT file name detected: {} or {}", oldFile.getFileName(), newFile.getFileName());
+            return false;
+        }
+
         try (NBTInputStream oldNbtStream = new NBTInputStream(new FileInputStream(oldFile.toFile()));
              NBTInputStream newNbtStream = new NBTInputStream(new FileInputStream(newFile.toFile()))) {
             
-            net.querz.nbt.io.NamedTag oldNamedTag = oldNbtStream.readTag(1024);
-            net.querz.nbt.io.NamedTag newNamedTag = newNbtStream.readTag(1024);
+            // Read with validation
+            net.querz.nbt.io.NamedTag oldNamedTag = readAndValidateNbtTag(oldNbtStream, oldFile);
+            if (oldNamedTag == null) return false;
+            
+            net.querz.nbt.io.NamedTag newNamedTag = readAndValidateNbtTag(newNbtStream, newFile);
+            if (newNamedTag == null) return false;
             
             return oldNamedTag.getName().equals(newNamedTag.getName()) &&
                    oldNamedTag.getTag().equals(newNamedTag.getTag());
         } catch (IOException e) {
-            LOGGER.error("Error reading NBT files: {}", e.getMessage());
+            LOGGER.error("Error reading NBT files: {} - {}", e.getMessage(), e.getClass().getSimpleName());
             return false;
         }
     }
 
+    private boolean isValidNbtFile(Path file) {
+        String fileName = file.getFileName().toString().toLowerCase();
+        return fileName.endsWith(".nbt") && 
+               Files.exists(file) && 
+               Files.isRegularFile(file) &&
+               Files.isReadable(file);
+    }
+
+    private net.querz.nbt.io.NamedTag readAndValidateNbtTag(NBTInputStream stream, Path file) {
+        try {
+            net.querz.nbt.io.NamedTag tag = stream.readTag(1024);
+            if (tag == null || tag.getTag() == null) {
+                LOGGER.error("Invalid NBT data structure in file: {}", file);
+                return null;
+            }
+            return tag;
+        } catch (IOException e) {
+            LOGGER.error("Failed to read NBT data from {}: {}", file, e.getMessage());
+            return null;
+        }
+    }
     private void saveDifferences(List<String> differences) {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter("differences.txt"))) {
             for (String difference : differences) {
