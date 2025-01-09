@@ -8,7 +8,6 @@ import java.nio.file.*;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
-import java.util.concurrent.*;
 import java.util.stream.Collectors;
 import java.util.function.Consumer;
 import net.querz.nbt.io.NBTInputStream;
@@ -17,188 +16,30 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.awt.Color;
 
-@Component
 public class MinecraftVersionHandler {
     private static final Logger LOGGER = LoggerFactory.getLogger(MinecraftVersionHandler.class);
     private static final String DECOMPILED_DIR = "versions";
-    private static final int THREAD_POOL_SIZE = Runtime.getRuntime().availableProcessors();
-    private final ExecutorService executorService;
-    private final VersionComparisonMetrics metrics;
 
-    public MinecraftVersionHandler() {
-        this.executorService = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
-        this.metrics = new VersionComparisonMetrics();
-    }
-
-    public static class VersionComparisonMetrics {
-        private int addedFiles = 0;
-        private int removedFiles = 0;
-        private int modifiedFiles = 0;
-        private long totalFilesProcessed = 0;
-        private long totalBytesProcessed = 0;
-        private Map<String, Integer> changesByFileType = new ConcurrentHashMap<>();
-        private long startTime;
-        private long endTime;
-
-        public void startComparison() {
-            startTime = System.currentTimeMillis();
-        }
-
-        public void endComparison() {
-            endTime = System.currentTimeMillis();
-        }
-
-        public double getComparisonTimeInSeconds() {
-            return (endTime - startTime) / 1000.0;
-        }
-
-        public synchronized void incrementAddedFiles() {
-            addedFiles++;
-        }
-
-        public synchronized void incrementRemovedFiles() {
-            removedFiles++;
-        }
-
-        public synchronized void incrementModifiedFiles() {
-            modifiedFiles++;
-        }
-
-        public synchronized void addProcessedBytes(long bytes) {
-            totalBytesProcessed += bytes;
-            totalFilesProcessed++;
-        }
-
-        public synchronized void recordFileTypeChange(String fileExtension) {
-            changesByFileType.merge(fileExtension, 1, Integer::sum);
-        }
-
-        public Map<String, Object> generateMetricsReport() {
-            Map<String, Object> report = new HashMap<>();
-            report.put("addedFiles", addedFiles);
-            report.put("removedFiles", removedFiles);
-            report.put("modifiedFiles", modifiedFiles);
-            report.put("totalFilesProcessed", totalFilesProcessed);
-            report.put("totalBytesProcessed", totalBytesProcessed);
-            report.put("processingTimeSeconds", getComparisonTimeInSeconds());
-            report.put("changesByFileType", changesByFileType);
-            report.put("changePercentage", calculateChangePercentage());
-            return report;
-        }
-
-        private double calculateChangePercentage() {
-            long totalChanges = addedFiles + removedFiles + modifiedFiles;
-            return totalFilesProcessed > 0 ? 
-                   (double) totalChanges / totalFilesProcessed * 100 : 0;
-        }
-    }
-
-    public static class ComparisonResult {
-        private final List<String> differences = Collections.synchronizedList(new ArrayList<>());
-        private Map<String, String> renames = new HashMap<>();
-        private Map<String, Object> metrics = new HashMap<>();
-
-        public synchronized void addDifference(String difference) {
-            differences.add(difference);
-        }
-
-        public List<String> getDifferences() {
-            return new ArrayList<>(differences);
-        }
-
-        public void setRenames(Map<String, String> renames) {
-            this.renames = renames;
-        }
-
-        public Map<String, String> getRenames() {
-            return renames;
-        }
-
-        public void setMetrics(Map<String, Object> metrics) {
-            this.metrics = metrics;
-        }
-
-        public Map<String, Object> getMetrics() {
-            return metrics;
-        }
-    }
-
-    public ComparisonResult compareMinecraftVersions(String cleanVersion, String mcVersion) {
-        metrics.startComparison();
-        ComparisonResult result = new ComparisonResult();
-
+    public void compareMinecraftVersions(String cleanVersion, String mcVersion) {
         try {
             File oldVersionDir = findVersionDirectory(cleanVersion);
+            if (oldVersionDir == null) {
+                LOGGER.error("Failed to find directory for clean version: {}", cleanVersion);
+                return;
+            }
+
             File newVersionDir = findVersionDirectory(mcVersion);
-
-            if (oldVersionDir == null || newVersionDir == null) {
-                LOGGER.error("Failed to find version directories");
-                return result;
+            if (newVersionDir == null) {
+                LOGGER.error("Failed to find directory for mc version: {}", mcVersion);
+                return;
             }
 
-            LOGGER.info("Starting comparison between versions: {} and {}", cleanVersion, mcVersion);
-            
-            // Parallel file mapping
-            CompletableFuture<Map<String, Path>> oldFilesFuture = CompletableFuture.supplyAsync(
-                () -> mapFiles(oldVersionDir), executorService);
-            CompletableFuture<Map<String, Path>> newFilesFuture = CompletableFuture.supplyAsync(
-                () -> mapFiles(newVersionDir), executorService);
-
-            Map<String, Path> oldFiles = oldFilesFuture.get();
-            Map<String, Path> newFiles = newFilesFuture.get();
-
-            // Process differences in parallel
-            List<CompletableFuture<Void>> comparisons = new ArrayList<>();
-            Set<String> allKeys = new HashSet<>();
-            allKeys.addAll(oldFiles.keySet());
-            allKeys.addAll(newFiles.keySet());
-
-            for (String key : allKeys) {
-                comparisons.add(CompletableFuture.runAsync(() -> {
-                    if (!newFiles.containsKey(key)) {
-                        result.addDifference("Removed: " + key);
-                        metrics.incrementRemovedFiles();
-                        metrics.recordFileTypeChange(getFileExtension(key));
-                    } else if (!oldFiles.containsKey(key)) {
-                        result.addDifference("Added: " + key);
-                        metrics.incrementAddedFiles();
-                        metrics.recordFileTypeChange(getFileExtension(key));
-                    } else {
-                        compareFileContents(oldFiles.get(key), newFiles.get(key), result);
-                    }
-                }, executorService));
-            }
-
-            // Wait for all comparisons to complete
-            CompletableFuture.allOf(comparisons.toArray(new CompletableFuture[0])).get();
-
-            // Process potential renames
-            List<Path> removedFiles = getRemovedFiles(result.getDifferences()).stream()
-                .map(Paths::get)
-                .collect(Collectors.toList());
-            List<Path> addedFiles = getAddedFiles(result.getDifferences()).stream()
-                .map(Paths::get)
-                .collect(Collectors.toList());
-                
-            Map<String, String> renames = findPotentialRenames(removedFiles, addedFiles);
-            result.setRenames(renames);
-
-            metrics.endComparison();
-            result.setMetrics(metrics.generateMetricsReport());
-
-            generateDetailedReport(result);
-            saveDifferences(result.getDifferences());
-
+            LOGGER.info("Proceeding with comparison between cleanVersion: {} and mcVersion: {}", cleanVersion, mcVersion);
+            List<String> differences = findDifferences(oldVersionDir, newVersionDir);
+            LOGGER.info("Differences found: {}", differences);
         } catch (Exception e) {
-            LOGGER.error("Error during version comparison: {}", e.getMessage(), e);
+            LOGGER.error("Error while comparing versions: {}", e.getMessage(), e);
         }
-
-        return result;
-    }
-
-    private String getFileExtension(String filename) {
-        int lastDot = filename.lastIndexOf('.');
-        return lastDot > 0 ? filename.substring(lastDot + 1) : "unknown";
     }
 
     private File findVersionDirectory(String version) {
@@ -218,18 +59,41 @@ public class MinecraftVersionHandler {
         return null;
     }
 
-    private Map<String, Path> mapFiles(File rootDir) {
-        Map<String, Path> allFiles = new HashMap<>();
+    private List<String> findDifferences(File oldVersionDir, File newVersionDir) {
+        List<String> differences = new ArrayList<>();
+
         try {
-            Files.walk(rootDir.toPath())
-                .filter(Files::isRegularFile)
-                .forEach(handleCheckedException(path -> {
-                    String relativePath = rootDir.toPath().relativize(path).toString();
-                    allFiles.put(relativePath, path);
-                }));
+            Map<String, Path> oldFiles = mapFiles(oldVersionDir);
+            Map<String, Path> newFiles = mapFiles(newVersionDir);
+
+            Set<String> allKeys = new HashSet<>();
+            allKeys.addAll(oldFiles.keySet());
+            allKeys.addAll(newFiles.keySet());
+
+            for (String key : allKeys) {
+                if (!newFiles.containsKey(key)) {
+                    differences.add("Removed: " + key);
+                } else if (!oldFiles.containsKey(key)) {
+                    differences.add("Added: " + key);
+                } else {
+                    compareFileContents(oldFiles.get(key), newFiles.get(key), differences);
+                }
+            }
         } catch (IOException e) {
-            LOGGER.error("Error mapping files: {}", e.getMessage());
+            LOGGER.error("Error comparing versions: {}", e.getMessage());
         }
+
+        return differences;
+    }
+
+    private Map<String, Path> mapFiles(File rootDir) throws IOException {
+        Map<String, Path> allFiles = new HashMap<>();
+        Files.walk(rootDir.toPath())
+            .filter(Files::isRegularFile)
+            .forEach(handleCheckedException(path -> {
+                String relativePath = rootDir.toPath().relativize(path).toString();
+                allFiles.put(relativePath, path);
+            }));
         return allFiles;
     }
 
@@ -247,192 +111,59 @@ public class MinecraftVersionHandler {
     private interface CheckedConsumer<T> {
         void accept(T t) throws IOException;
     }
-
-    private void compareFileContents(Path oldFile, Path newFile, ComparisonResult result) {
+    private void compareFileContents(Path oldFile, Path newFile, List<String> differences) {
         try {
             String oldFileName = oldFile.getFileName().toString();
-            String oldPath = oldFile.toString();
-            String newPath = newFile.toString();
-            long fileSize = Files.size(oldFile) + Files.size(newFile);
-            metrics.addProcessedBytes(fileSize);
+            String newFileName = newFile.getFileName().toString();
     
-            // Compare folder structure
-            String oldFolder = oldFile.getParent().toString();
-            String newFolder = newFile.getParent().toString();
-            if (!oldFolder.equals(newFolder)) {
-                result.addDifference("Folder structure changed: " + oldFolder + " -> " + newFolder);
-            }
-    
-            // Compare class files and their names
-            if (oldFileName.endsWith(".class")) {
-                String oldClassName = oldFileName.substring(0, oldFileName.length() - 6); // Remove .class
-                String newClassName = newFile.getFileName().toString();
-                newClassName = newClassName.substring(0, newClassName.length() - 6);
-    
-                if (!oldClassName.equals(newClassName)) {
-                    result.addDifference("Class renamed: " + oldClassName + " -> " + newClassName);
+            if (oldFileName.endsWith(".png") || newFileName.endsWith(".png")) {
+                if (!comparePngFiles(oldFile, newFile)) {
+                    differences.add("Modified (PNG): " + oldFile.toString() + " vs. " + newFile.toString());
                 }
-    
-                // Compare class file contents
+            } else if (oldFileName.endsWith(".class") || newFileName.endsWith(".class")) {
                 if (Files.mismatch(oldFile, newFile) != -1) {
-                    result.addDifference(String.format("Modified class: %s\n  - Old path: %s\n  - New path: %s", 
-                        oldClassName, oldPath, newPath));
-                    metrics.incrementModifiedFiles();
-                    metrics.recordFileTypeChange("class");
+                    differences.add("Modified (binary): " + oldFile.toString() + " vs. " + newFile.toString());
                 }
-            } 
-            // Handle other file types
-            else if (oldFileName.endsWith(".png")) {
-                handlePngComparison(oldFile, newFile, result);
-            } else if (oldFileName.endsWith(".nbt")) {
-                handleNbtComparison(oldFile, newFile, result);
+            } else if (oldFileName.endsWith(".nbt") || newFileName.endsWith(".nbt")) {
+                if (!compareNbtFiles(oldFile, newFile)) {
+                    differences.add("Modified (NBT): " + oldFile.toString() + " vs. " + newFile.toString());
+                }
             } else {
-                handleTextFileComparison(oldFile, newFile, result);
-            }
-         // Log the comparison details
-         LOGGER.info("Compared files:\n  - Old: {}\n  - New: {}", oldPath, newPath);
-
-        } catch (IOException e) {
-            LOGGER.error("Error comparing files: {} vs {}: {}", oldFile, newFile, e.getMessage());
-        }
-    }
-
-    private void handlePngComparison(Path oldFile, Path newFile, ComparisonResult result) {
-        if (!comparePngFiles(oldFile, newFile)) {
-            result.addDifference("Modified (PNG): " + oldFile + " vs. " + newFile);
-            metrics.incrementModifiedFiles();
-            metrics.recordFileTypeChange("png");
-        }
-    }
-
-    private void handleBinaryComparison(Path oldFile, Path newFile, ComparisonResult result) {
-        try {
-            if (Files.mismatch(oldFile, newFile) != -1) {
-                result.addDifference("Modified (binary): " + oldFile + " vs. " + newFile);
-                metrics.incrementModifiedFiles();
-                metrics.recordFileTypeChange("class");
+                List<String> oldLines = Files.readAllLines(oldFile);
+                List<String> newLines = Files.readAllLines(newFile);
+                if (!oldLines.equals(newLines)) {
+                    differences.add("Modified: " + oldFile.toString() + " vs. " + newFile.toString());
+                }
             }
         } catch (IOException e) {
-            LOGGER.error("Error comparing binary files: {}", e.getMessage());
+            LOGGER.error("Error reading files: {}. Old File: {}, New File: {}", e.getMessage(), oldFile.toString(), newFile.toString());
         }
-    }
-
-    private void handleNbtComparison(Path oldFile, Path newFile, ComparisonResult result) {
-        if (!compareNbtFiles(oldFile, newFile)) {
-            result.addDifference("Modified (NBT): " + oldFile + " vs. " + newFile);
-            metrics.incrementModifiedFiles();
-            metrics.recordFileTypeChange("nbt");
-        }
-    }
-
-    private void handleTextFileComparison(Path oldFile, Path newFile, ComparisonResult result) {
-        try {
-            List<String> oldLines = Files.readAllLines(oldFile);
-            List<String> newLines = Files.readAllLines(newFile);
-            if (!oldLines.equals(newLines)) {
-                result.addDifference("Modified: " + oldFile + " vs. " + newFile);
-                metrics.incrementModifiedFiles();
-                metrics.recordFileTypeChange(getFileExtension(oldFile.toString()));
-            }
-        } catch (IOException e) {
-            LOGGER.error("Error comparing text files: {}", e.getMessage());
-        }
-    }
-
-
-    private List<String> getRemovedFiles(List<String> differences) {
-        return differences.stream()
-            .filter(diff -> diff.startsWith("Removed: "))
-            .map(diff -> diff.substring("Removed: ".length()))
-            .collect(Collectors.toList());
     }
     
-    private List<String> getAddedFiles(List<String> differences) {
-        return differences.stream()
-            .filter(diff -> diff.startsWith("Added: "))
-            .map(diff -> diff.substring("Added: ".length()))
-            .collect(Collectors.toList());
-    }
-
-   
-private void generateDetailedReport(ComparisonResult result) {
-    try (BufferedWriter writer = Files.newBufferedWriter(Paths.get("detailed_report.txt"))) {
-        writer.write("=== Detailed Comparison Report ===\n\n");
-        
-        // Group changes by type
-        Map<String, List<String>> groupedChanges = result.getDifferences().stream()
-            .collect(Collectors.groupingBy(diff -> {
-                if (diff.startsWith("Added:")) return "Added Files";
-                if (diff.startsWith("Removed:")) return "Removed Files";
-                if (diff.startsWith("Modified class:")) return "Modified Classes";
-                if (diff.startsWith("Class renamed:")) return "Renamed Classes";
-                if (diff.startsWith("Folder structure changed:")) return "Folder Changes";
-                return "Other Changes";
-            }));
-
-        // Write each group
-        groupedChanges.forEach((group, changes) -> {
-            try {
-                writer.write(group + ":\n");
-                writer.write("-".repeat(group.length() + 1) + "\n");
-                changes.forEach(change -> {
-                    try {
-                        writer.write(change + "\n");
-                    } catch (IOException e) {
-                        LOGGER.error("Error writing change: {}", e.getMessage());
-                    }
-                });
-                writer.write("\n");
-            } catch (IOException e) {
-                LOGGER.error("Error writing group {}: {}", group, e.getMessage());
-            }
-        }); 
-          // Write metrics
-          writer.write("\n=== Metrics ===\n");
-          Map<String, Object> metrics = result.getMetrics();
-          writer.write(String.format("Total files processed: %d\n", metrics.get("totalFilesProcessed")));
-          writer.write(String.format("Added files: %d\n", metrics.get("addedFiles")));
-          writer.write(String.format("Removed files: %d\n", metrics.get("removedFiles")));
-          writer.write(String.format("Modified files: %d\n", metrics.get("modifiedFiles")));
-          writer.write(String.format("Processing time: %.2f seconds\n", metrics.get("processingTimeSeconds")));
-  
-      } catch (IOException e) {
-          LOGGER.error("Error generating detailed report: {}", e.getMessage());
-      }
-    }
-
-
     private boolean comparePngFiles(Path oldFile, Path newFile) {
-        LOGGER.info("Comparing PNG files: {} and {}", oldFile.getFileName(), newFile.getFileName());
-    
         try {
             BufferedImage oldImage = ImageIO.read(oldFile.toFile());
             BufferedImage newImage = ImageIO.read(newFile.toFile());
     
             if (oldImage == null || newImage == null) {
-                LOGGER.error("Failed to read one of the PNG files: Old File: {}, New File: {}", oldFile, newFile);
+                LOGGER.error("Failed to read one of the PNG files: Old File: {}, New File: {}", oldFile.toString(), newFile.toString());
                 return false;
             }
     
             if (oldImage.getWidth() != newImage.getWidth() || oldImage.getHeight() != newImage.getHeight()) {
-                LOGGER.warn("Image dimensions do not match: Old File: {} ({}x{}), New File: {} ({}x{})",
-                        oldFile, oldImage.getWidth(), oldImage.getHeight(), newFile, newImage.getWidth(), newImage.getHeight());
                 return false;
             }
     
             for (int y = 0; y < oldImage.getHeight(); y++) {
                 for (int x = 0; x < oldImage.getWidth(); x++) {
                     if (!colorsAreEqual(new Color(oldImage.getRGB(x, y)), new Color(newImage.getRGB(x, y)))) {
-                        LOGGER.debug("Pixel mismatch found at (x={}, y={}): Old File: {} ({}), New File: {} ({})",
-                                x, y, oldFile, oldImage.getRGB(x, y), newFile, newImage.getRGB(x, y));
                         return false;
                     }
                 }
             }
-            LOGGER.info("PNG files are identical: {} and {}", oldFile.getFileName(), newFile.getFileName());
             return true;
         } catch (IOException e) {
-            LOGGER.error("Error reading PNG files: Old File: {}, New File: {}, Error: {}", oldFile, newFile, e.getMessage(), e);
+            LOGGER.error("Error reading PNG files: Old File: {}, New File: {}, Error: {}", oldFile.toString(), newFile.toString(), e.getMessage());
             return false;
         }
     }
@@ -440,116 +171,96 @@ private void generateDetailedReport(ComparisonResult result) {
     private boolean colorsAreEqual(Color color1, Color color2) {
         return color1.getRGB() == color2.getRGB();
     }
-
+    
     private boolean compareNbtFiles(Path oldFile, Path newFile) {
         LOGGER.info("Comparing NBT files: {} and {}", oldFile.getFileName(), newFile.getFileName());
-        
+        // Validate file names first
         if (!isValidNbtFile(oldFile) || !isValidNbtFile(newFile)) {
-            LOGGER.warn("Invalid NBT file detected: {} or {}", oldFile.getFileName(), newFile.getFileName());
+            LOGGER.warn("Invalid NBT file name detected: {} or {}", oldFile.getFileName(), newFile.getFileName());
             return false;
         }
-        
-        try (FileInputStream oldFis = new FileInputStream(oldFile.toFile());
-             FileInputStream newFis = new FileInputStream(newFile.toFile());
-             BufferedInputStream oldBis = new BufferedInputStream(oldFis);
-             BufferedInputStream newBis = new BufferedInputStream(newFis);
-             NBTInputStream oldNbtStream = new NBTInputStream(oldBis);
-             NBTInputStream newNbtStream = new NBTInputStream(newBis)) {
     
-            // Read the root compound tags
-            CompoundTag oldRoot = readNbtRootTag(oldNbtStream, oldFile);
-            CompoundTag newRoot = readNbtRootTag(newNbtStream, newFile);
-    
-            if (oldRoot == null || newRoot == null) {
-                LOGGER.warn("One or both NBT files could not be read properly");
+        try (NBTInputStream oldNbtStream = new NBTInputStream(new BufferedInputStream(new FileInputStream(oldFile.toFile())));
+             NBTInputStream newNbtStream = new NBTInputStream(new BufferedInputStream(new FileInputStream(newFile.toFile())))) {
+            
+            // Increase max depth and add buffering for larger files
+            net.querz.nbt.io.NamedTag oldNamedTag = readAndValidateNbtTag(oldNbtStream, oldFile, 8192);
+            if (oldNamedTag == null) {
+                LOGGER.error("Failed to read old NBT file: {}", oldFile);
                 return false;
             }
-    
-            return compareNbtTags(oldRoot, newRoot);
-        } catch (Exception e) {
-            LOGGER.error("Error comparing NBT files: {} and {} - Error: {} - Stack trace: {}", 
-                oldFile, newFile, e.getMessage(), Arrays.toString(e.getStackTrace()));
-            return false;
-        }
-    }
-    
-    private CompoundTag readNbtRootTag(NBTInputStream stream, Path file) {
-        try {
-            // Add the required depth parameter (e.g., 8192)
-            net.querz.nbt.io.NamedTag namedTag = stream.readTag(8192);
-            if (namedTag == null) {
-                LOGGER.error("Null named tag read from NBT file: {}", file);
-                return null;
+            
+            net.querz.nbt.io.NamedTag newNamedTag = readAndValidateNbtTag(newNbtStream, newFile, 8192);
+            if (newNamedTag == null) {
+                LOGGER.error("Failed to read new NBT file: {}", newFile);
+                return false;
             }
             
-            if (!(namedTag.getTag() instanceof CompoundTag)) {
-                LOGGER.error("Root tag is not a CompoundTag in file: {}", file);
-                return null;
+            boolean namesEqual = oldNamedTag.getName().equals(newNamedTag.getName());
+            boolean tagsEqual = oldNamedTag.getTag().equals(newNamedTag.getTag());
+            
+            if (!namesEqual || !tagsEqual) {
+                LOGGER.debug("NBT comparison failed - Names equal: {}, Tags equal: {}", namesEqual, tagsEqual);
             }
             
-            return (CompoundTag) namedTag.getTag();
+            return namesEqual && tagsEqual;
         } catch (IOException e) {
-            LOGGER.error("Failed to read NBT data from {}: {} - Stack trace: {}", 
-                file, e.getMessage(), Arrays.toString(e.getStackTrace()));
-            return null;
-        }
-    }
-    
-    private boolean compareNbtTags(CompoundTag tag1, CompoundTag tag2) {
-        // First compare the key sets
-        if (!tag1.keySet().equals(tag2.keySet())) {
-            LOGGER.debug("NBT tags have different keys");
+            LOGGER.error("Error reading NBT files: {} - {} - Stack trace: {}", 
+                e.getMessage(), 
+                e.getClass().getSimpleName(),
+                Arrays.toString(e.getStackTrace()));
             return false;
         }
-    
-        // Then compare each value
-        for (String key : tag1.keySet()) {
-            if (!Objects.equals(tag1.get(key), tag2.get(key))) {
-                LOGGER.debug("NBT tags differ at key: {}", key);
-                return false;
-            }
-        }
-    
-        return true;
     }
     
     private boolean isValidNbtFile(Path file) {
         try {
-            if (!Files.exists(file)) {
-                LOGGER.warn("NBT file does not exist: {}", file);
-                return false;
-            }
-            
-            if (!Files.isRegularFile(file)) {
-                LOGGER.warn("Not a regular file: {}", file);
-                return false;
-            }
-            
-            if (!Files.isReadable(file)) {
-                LOGGER.warn("File is not readable: {}", file);
-                return false;
-            }
-            
-            long fileSize = Files.size(file);
-            if (fileSize == 0) {
-                LOGGER.warn("File is empty: {}", file);
-                return false;
-            }
-            
-            // Check file extension
             String fileName = file.getFileName().toString().toLowerCase();
-            if (!fileName.endsWith(".nbt")) {
-                LOGGER.warn("File does not have .nbt extension: {}", file);
-                return false;
-            }
+            boolean isValid = fileName.endsWith(".nbt") && 
+                             Files.exists(file) && 
+                             Files.isRegularFile(file) &&
+                             Files.isReadable(file) &&
+                             Files.size(file) > 0;
             
-            return true;
+            if (!isValid) {
+                LOGGER.warn("NBT file validation failed for {}: exists={}, isFile={}, isReadable={}, size={}",
+                    file,
+                    Files.exists(file),
+                    Files.isRegularFile(file),
+                    Files.isReadable(file),
+                    Files.size(file));
+            }
+            return isValid;
         } catch (IOException e) {
             LOGGER.error("Error validating NBT file {}: {}", file, e.getMessage());
             return false;
         }
     }
     
+    private net.querz.nbt.io.NamedTag readAndValidateNbtTag(NBTInputStream stream, Path file, int maxDepth) {
+        try {
+            net.querz.nbt.io.NamedTag tag = stream.readTag(maxDepth);
+            if (tag == null) {
+                LOGGER.error("Null tag read from NBT file: {}", file);
+                return null;
+            }
+            if (tag.getTag() == null) {
+                LOGGER.error("Null inner tag in NBT file: {}", file);
+                return null;
+            }
+            LOGGER.debug("Successfully read NBT tag from {}: name={}, tag type={}", 
+                file,
+                tag.getName(),
+                tag.getTag().getClass().getSimpleName());
+            return tag;
+        } catch (IOException e) {
+            LOGGER.error("Failed to read NBT data from {}: {} - Stack trace: {}", 
+                file, 
+                e.getMessage(),
+                Arrays.toString(e.getStackTrace()));
+            return null;
+        }
+    }
     private void saveDifferences(List<String> differences) {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter("differences.txt"))) {
             for (String difference : differences) {
@@ -561,7 +272,6 @@ private void generateDetailedReport(ComparisonResult result) {
             LOGGER.error("Error saving differences: {}", e.getMessage());
         }
     }
-    
 
     private Map<String, String> findPotentialRenames(List<Path> removedFiles, List<Path> addedFiles) {
         Map<String, String> renames = new HashMap<>();
