@@ -116,35 +116,87 @@ public class MinecraftVersionHandler {
     private interface CheckedConsumer<T> {
         void accept(T t) throws IOException;
     }
-    private void compareFileContents(Path oldFile, Path newFile, List<String> differences) {
-        try {
-            String oldFileName = oldFile.getFileName().toString();
-            String newFileName = newFile.getFileName().toString();
-    
-            if (oldFileName.endsWith(".png") || newFileName.endsWith(".png")) {
-                if (!comparePngFiles(oldFile, newFile)) {
-                    differences.add("Modified (PNG): " + oldFile.toString() + " vs. " + newFile.toString());
+        private void compareFileContents(Path oldFile, Path newFile, List<String> differences) {
+            try {
+                String oldFileName = oldFile.getFileName().toString();
+                String newFileName = newFile.getFileName().toString();
+        
+                if (oldFileName.endsWith(".class")) {
+                    // Handle obfuscated Minecraft class files
+                    compareMinecraftClassFiles(oldFile, newFile, differences);
+                } else if (oldFileName.endsWith(".nbt")) {
+                    if (!compareNbtFiles(oldFile, newFile)) {
+                        differences.add(String.format("Modified (NBT): %s -> %s", 
+                            oldFile.toAbsolutePath(), 
+                            newFile.toAbsolutePath()));
+                    }
+                } else if (oldFileName.endsWith(".png")) {
+                    if (!comparePngFiles(oldFile, newFile)) {
+                        differences.add(String.format("Modified (PNG): %s -> %s", 
+                            oldFile.toAbsolutePath(), 
+                            newFile.toAbsolutePath()));
+                    }
+                } else {
+                    compareTextFiles(oldFile, newFile, differences);
                 }
-            } else if (oldFileName.endsWith(".class") || newFileName.endsWith(".class")) {
-                if (Files.mismatch(oldFile, newFile) != -1) {
-                    differences.add("Modified (binary): " + oldFile.toString() + " vs. " + newFile.toString());
-                }
-            } else if (oldFileName.endsWith(".nbt") || newFileName.endsWith(".nbt")) {
-                if (!compareNbtFiles(oldFile, newFile)) {
-                    differences.add("Modified (NBT): " + oldFile.toString() + " vs. " + newFile.toString());
-                }
-            } else {
+            } catch (Exception e) {  // Changed from IOException to Exception
+                LOGGER.error("Error comparing files: {} vs {}: {}", 
+                    oldFile.toAbsolutePath(), 
+                    newFile.toAbsolutePath(), 
+                    e.getMessage());
+            }
+        }
+        private void compareTextFiles(Path oldFile, Path newFile, List<String> differences) {
+            try {
                 List<String> oldLines = Files.readAllLines(oldFile);
                 List<String> newLines = Files.readAllLines(newFile);
+                
                 if (!oldLines.equals(newLines)) {
-                    differences.add("Modified: " + oldFile.toString() + " vs. " + newFile.toString());
+                    differences.add(String.format("Modified (Text): %s -> %s", 
+                        oldFile.toAbsolutePath(), 
+                        newFile.toAbsolutePath()));
                 }
+            } catch (IOException e) {
+                LOGGER.error("Error comparing text files: {} vs {}: {}", 
+                    oldFile.toAbsolutePath(), 
+                    newFile.toAbsolutePath(), 
+                    e.getMessage());
             }
-        } catch (IOException e) {
-            LOGGER.error("Error reading files: {}. Old File: {}, New File: {}", e.getMessage(), oldFile.toString(), newFile.toString());
         }
-    }
-    
+
+        private void compareMinecraftClassFiles(Path oldFile, Path newFile, List<String> differences) {
+            try {
+                byte[] oldBytes = Files.readAllBytes(oldFile);
+                byte[] newBytes = Files.readAllBytes(newFile);
+        
+                if (!Arrays.equals(oldBytes, newBytes)) {
+                    String className = oldFile.getFileName().toString().replace(".class", "");
+                    boolean isInnerClass = className.contains("$");
+                    String classType = isInnerClass ? "Inner Class" : "Class";
+                    String outerClass = isInnerClass ? className.substring(0, className.indexOf("$")) : null;
+        
+                    StringBuilder diffMessage = new StringBuilder();
+                    diffMessage.append(String.format("Modified (%s): %s\n", classType, className));
+                    diffMessage.append(String.format("  Old path: %s\n", oldFile.toAbsolutePath()));
+                    diffMessage.append(String.format("  New path: %s\n", newFile.toAbsolutePath()));
+                    diffMessage.append(String.format("  Size: %d -> %d bytes\n", oldBytes.length, newBytes.length));
+        
+                    if (isInnerClass) {
+                        diffMessage.append(String.format("  Outer class: %s\n", outerClass));
+                    }
+        
+                    differences.add(diffMessage.toString());
+                    LOGGER.debug("Found difference in class file: {}", className);
+                }
+            } catch (IOException e) {
+                LOGGER.error("Error comparing class files: {} vs {}: {}", 
+                    oldFile.getFileName(), 
+                    newFile.getFileName(), 
+                    e.getMessage());
+            }
+        }
+
+
     private boolean comparePngFiles(Path oldFile, Path newFile) {
         try {
             BufferedImage oldImage = ImageIO.read(oldFile.toFile());
