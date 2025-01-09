@@ -177,42 +177,110 @@ public class MinecraftVersionHandler {
         return color1.getRGB() == color2.getRGB();
     }
     
-  
     private boolean compareNbtFiles(Path oldFile, Path newFile) {
-        LOGGER.info("Comparing NBT files: {} and {}", oldFile.getFileName(), newFile.getFileName());
+        LOGGER.info("Comparing NBT files:\nOld: {}\nNew: {}", 
+            oldFile.toAbsolutePath(), 
+            newFile.toAbsolutePath());
         
         if (!isValidNbtFile(oldFile) || !isValidNbtFile(newFile)) {
-            LOGGER.warn("Invalid NBT file detected: {} or {}", oldFile.getFileName(), newFile.getFileName());
+            LOGGER.warn("Invalid NBT file detected:\nOld: {}\nNew: {}", 
+                oldFile.toAbsolutePath(), 
+                newFile.toAbsolutePath());
             return false;
         }
         
         try {
-            CompoundBinaryTag oldRoot = readNbtFile(oldFile);
-            CompoundBinaryTag newRoot = readNbtFile(newFile);
+            // Try different compression types
+            CompoundBinaryTag oldRoot = readNbtFileWithFallback(oldFile);
+            CompoundBinaryTag newRoot = readNbtFileWithFallback(newFile);
             
             if (oldRoot == null || newRoot == null) {
-                LOGGER.warn("Failed to read one or both NBT files");
+                LOGGER.warn("Failed to read one or both NBT files:\nOld: {}\nNew: {}", 
+                    oldFile.toAbsolutePath(), 
+                    newFile.toAbsolutePath());
                 return false;
             }
             
             return compareNbtTags(oldRoot, newRoot);
-            
         } catch (Exception e) {
-            LOGGER.error("Error comparing NBT files: {} - Stack trace: {}", 
-                e.getMessage(), Arrays.toString(e.getStackTrace()));
+            LOGGER.error("Error comparing NBT files:\nOld: {}\nNew: {}\nError: {}", 
+                oldFile.toAbsolutePath(), 
+                newFile.toAbsolutePath(),
+                e.getMessage());
             return false;
         }
     }
     
+    private CompoundBinaryTag readNbtFileWithFallback(Path file) {
+        // Try different compression types in order
+        BinaryTagIO.Compression[] compressionTypes = {
+            BinaryTagIO.Compression.GZIP,
+            BinaryTagIO.Compression.ZLIB,
+            BinaryTagIO.Compression.NONE
+        };
+    
+        for (BinaryTagIO.Compression compression : compressionTypes) {
+            try {
+                BinaryTagIO.Reader reader = BinaryTagIO.reader();
+                CompoundBinaryTag tag = reader.read(file);
+                if (tag != null) {
+                    LOGGER.debug("Successfully read NBT file {} with compression {}", 
+                        file.getFileName(), compression);
+                    return tag;
+                }
+            } catch (IOException e) {
+                LOGGER.debug("Failed to read NBT file {} with compression {}: {}", 
+                    file.getFileName(), compression, e.getMessage());
+            }
+        }
+        
+        LOGGER.error("Failed to read NBT file {} with all compression types", file.getFileName());
+        return null;
+    }
+    
     private CompoundBinaryTag readNbtFile(Path file) {
         try {
-            return BinaryTagIO.reader().read(file, BinaryTagIO.Compression.GZIP);
+            BinaryTagIO.Reader reader = BinaryTagIO.reader();
+            return reader.read(file);
         } catch (IOException e) {
             LOGGER.error("Failed to read NBT file {}: {} - Stack trace: {}", 
                 file, e.getMessage(), Arrays.toString(e.getStackTrace()));
             return null;
         }
     }
+    
+    private boolean isValidNbtFile(Path file) {
+        try {
+            if (!Files.exists(file)) {
+                LOGGER.warn("File does not exist: {}", file.toAbsolutePath());
+                return false;
+            } 
+            
+            if (!Files.isRegularFile(file)) {
+                LOGGER.warn("Not a regular file: {}", file.toAbsolutePath());
+                return false;
+            }
+            
+            if (!Files.isReadable(file)) {
+                LOGGER.warn("File is not readable: {}", file.toAbsolutePath());
+                return false;
+            }
+            
+            long fileSize = Files.size(file);
+            if (fileSize == 0) {
+                LOGGER.warn("File is empty: {}", file.toAbsolutePath());
+                return false;
+            }
+            
+            // Try to read the file with different compression types
+            return readNbtFileWithFallback(file) != null;
+            
+        } catch (IOException e) {
+            LOGGER.error("Error validating NBT file {}: {}", file.toAbsolutePath(), e.getMessage());
+            return false;
+        }
+    }
+
     
     private boolean compareNbtTags(CompoundBinaryTag tag1, CompoundBinaryTag tag2) {
         Set<String> keys1 = tag1.keySet();  // Changed from keys() to keySet()
@@ -280,27 +348,7 @@ public class MinecraftVersionHandler {
         return true;
     }
     
-    private boolean isValidNbtFile(Path file) {
-        try {
-            if (!Files.exists(file) || !Files.isRegularFile(file) || 
-                !Files.isReadable(file) || Files.size(file) == 0) {
-                LOGGER.warn("Invalid file: {}", file);
-                return false;
-            }
-            
-            try {
-                BinaryTagIO.reader().read(file, BinaryTagIO.Compression.GZIP);
-                return true;
-            } catch (Exception e) {
-                LOGGER.warn("File is not a valid NBT file: {} - {}", file, e.getMessage());
-                return false;
-            }
-            
-        } catch (IOException e) {
-            LOGGER.error("Error validating NBT file {}: {}", file, e.getMessage());
-            return false;
-        }
-    }  
+  
 
    private void saveDifferences(List<String> differences) {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter("differences.txt"))) {
