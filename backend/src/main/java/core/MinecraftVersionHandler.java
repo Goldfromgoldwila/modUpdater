@@ -10,11 +10,16 @@ import java.security.NoSuchAlgorithmException;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.function.Consumer;
-import net.querz.nbt.io.NBTInputStream;
-import net.querz.nbt.tag.CompoundTag;
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.awt.Color;
+import net.kyori.adventure.nbt.BinaryTag;
+import net.kyori.adventure.nbt.BinaryTagIO;
+import net.kyori.adventure.nbt.CompoundBinaryTag;
+import net.kyori.adventure.nbt.ListBinaryTag;
+import net.kyori.adventure.nbt.ByteArrayBinaryTag;
+import net.kyori.adventure.nbt.IntArrayBinaryTag;
+import net.kyori.adventure.nbt.LongArrayBinaryTag;
 
 public class MinecraftVersionHandler {
     private static final Logger LOGGER = LoggerFactory.getLogger(MinecraftVersionHandler.class);
@@ -172,96 +177,132 @@ public class MinecraftVersionHandler {
         return color1.getRGB() == color2.getRGB();
     }
     
+  
     private boolean compareNbtFiles(Path oldFile, Path newFile) {
         LOGGER.info("Comparing NBT files: {} and {}", oldFile.getFileName(), newFile.getFileName());
-        // Validate file names first
+        
         if (!isValidNbtFile(oldFile) || !isValidNbtFile(newFile)) {
-            LOGGER.warn("Invalid NBT file name detected: {} or {}", oldFile.getFileName(), newFile.getFileName());
+            LOGGER.warn("Invalid NBT file detected: {} or {}", oldFile.getFileName(), newFile.getFileName());
             return false;
         }
+        
+        try {
+            CompoundBinaryTag oldRoot = readNbtFile(oldFile);
+            CompoundBinaryTag newRoot = readNbtFile(newFile);
+            
+            if (oldRoot == null || newRoot == null) {
+                LOGGER.warn("Failed to read one or both NBT files");
+                return false;
+            }
+            
+            return compareNbtTags(oldRoot, newRoot);
+            
+        } catch (Exception e) {
+            LOGGER.error("Error comparing NBT files: {} - Stack trace: {}", 
+                e.getMessage(), Arrays.toString(e.getStackTrace()));
+            return false;
+        }
+    }
     
-        try (NBTInputStream oldNbtStream = new NBTInputStream(new BufferedInputStream(new FileInputStream(oldFile.toFile())));
-             NBTInputStream newNbtStream = new NBTInputStream(new BufferedInputStream(new FileInputStream(newFile.toFile())))) {
-            
-            // Increase max depth and add buffering for larger files
-            net.querz.nbt.io.NamedTag oldNamedTag = readAndValidateNbtTag(oldNbtStream, oldFile, 8192);
-            if (oldNamedTag == null) {
-                LOGGER.error("Failed to read old NBT file: {}", oldFile);
-                return false;
-            }
-            
-            net.querz.nbt.io.NamedTag newNamedTag = readAndValidateNbtTag(newNbtStream, newFile, 8192);
-            if (newNamedTag == null) {
-                LOGGER.error("Failed to read new NBT file: {}", newFile);
-                return false;
-            }
-            
-            boolean namesEqual = oldNamedTag.getName().equals(newNamedTag.getName());
-            boolean tagsEqual = oldNamedTag.getTag().equals(newNamedTag.getTag());
-            
-            if (!namesEqual || !tagsEqual) {
-                LOGGER.debug("NBT comparison failed - Names equal: {}, Tags equal: {}", namesEqual, tagsEqual);
-            }
-            
-            return namesEqual && tagsEqual;
+    private CompoundBinaryTag readNbtFile(Path file) {
+        try {
+            return BinaryTagIO.reader().read(file, BinaryTagIO.Compression.GZIP);
         } catch (IOException e) {
-            LOGGER.error("Error reading NBT files: {} - {} - Stack trace: {}", 
-                e.getMessage(), 
-                e.getClass().getSimpleName(),
-                Arrays.toString(e.getStackTrace()));
+            LOGGER.error("Failed to read NBT file {}: {} - Stack trace: {}", 
+                file, e.getMessage(), Arrays.toString(e.getStackTrace()));
+            return null;
+        }
+    }
+    
+    private boolean compareNbtTags(CompoundBinaryTag tag1, CompoundBinaryTag tag2) {
+        Set<String> keys1 = tag1.keySet();  // Changed from keys() to keySet()
+        
+        if (tag1.size() != tag2.size()) {
+            LOGGER.debug("NBT tags have different number of entries: {} vs {}", 
+                tag1.size(), tag2.size());
             return false;
         }
+        
+        for (String key : keys1) {
+            BinaryTag value1 = tag1.get(key);
+            BinaryTag value2 = tag2.get(key);
+            
+            if (value2 == null) {
+                LOGGER.debug("Key {} missing in second NBT file", key);
+                return false;
+            }
+            
+            if (!compareTagValues(value1, value2)) {
+                LOGGER.debug("Values differ for key {}: {} vs {}", 
+                    key, value1, value2);
+                return false;
+            }
+        }
+        
+        return true;
+    }
+    
+    private boolean compareTagValues(BinaryTag tag1, BinaryTag tag2) {
+        if (tag1.type() != tag2.type()) {
+            return false;
+        }
+        
+        // Replace switch with if-else for Java 8 compatibility
+        if (tag1 instanceof CompoundBinaryTag) {
+            return compareNbtTags((CompoundBinaryTag) tag1, (CompoundBinaryTag) tag2);
+        } else if (tag1 instanceof ListBinaryTag) {
+            return compareListTags((ListBinaryTag) tag1, (ListBinaryTag) tag2);
+        } else if (tag1 instanceof ByteArrayBinaryTag) {
+            return Arrays.equals(((ByteArrayBinaryTag) tag1).value(), 
+                               ((ByteArrayBinaryTag) tag2).value());
+        } else if (tag1 instanceof IntArrayBinaryTag) {
+            return Arrays.equals(((IntArrayBinaryTag) tag1).value(), 
+                               ((IntArrayBinaryTag) tag2).value());
+        } else if (tag1 instanceof LongArrayBinaryTag) {
+            return Arrays.equals(((LongArrayBinaryTag) tag1).value(), 
+                               ((LongArrayBinaryTag) tag2).value());
+        } else {
+            return tag1.equals(tag2);
+        }
+    }
+    
+    private boolean compareListTags(ListBinaryTag list1, ListBinaryTag list2) {
+        if (list1.size() != list2.size()) {
+            return false;
+        }
+        
+        for (int i = 0; i < list1.size(); i++) {
+            if (!compareTagValues(list1.get(i), list2.get(i))) {
+                return false;
+            }
+        }
+        
+        return true;
     }
     
     private boolean isValidNbtFile(Path file) {
         try {
-            String fileName = file.getFileName().toString().toLowerCase();
-            boolean isValid = fileName.endsWith(".nbt") && 
-                             Files.exists(file) && 
-                             Files.isRegularFile(file) &&
-                             Files.isReadable(file) &&
-                             Files.size(file) > 0;
-            
-            if (!isValid) {
-                LOGGER.warn("NBT file validation failed for {}: exists={}, isFile={}, isReadable={}, size={}",
-                    file,
-                    Files.exists(file),
-                    Files.isRegularFile(file),
-                    Files.isReadable(file),
-                    Files.size(file));
+            if (!Files.exists(file) || !Files.isRegularFile(file) || 
+                !Files.isReadable(file) || Files.size(file) == 0) {
+                LOGGER.warn("Invalid file: {}", file);
+                return false;
             }
-            return isValid;
+            
+            try {
+                BinaryTagIO.reader().read(file, BinaryTagIO.Compression.GZIP);
+                return true;
+            } catch (Exception e) {
+                LOGGER.warn("File is not a valid NBT file: {} - {}", file, e.getMessage());
+                return false;
+            }
+            
         } catch (IOException e) {
             LOGGER.error("Error validating NBT file {}: {}", file, e.getMessage());
             return false;
         }
-    }
-    
-    private net.querz.nbt.io.NamedTag readAndValidateNbtTag(NBTInputStream stream, Path file, int maxDepth) {
-        try {
-            net.querz.nbt.io.NamedTag tag = stream.readTag(maxDepth);
-            if (tag == null) {
-                LOGGER.error("Null tag read from NBT file: {}", file);
-                return null;
-            }
-            if (tag.getTag() == null) {
-                LOGGER.error("Null inner tag in NBT file: {}", file);
-                return null;
-            }
-            LOGGER.debug("Successfully read NBT tag from {}: name={}, tag type={}", 
-                file,
-                tag.getName(),
-                tag.getTag().getClass().getSimpleName());
-            return tag;
-        } catch (IOException e) {
-            LOGGER.error("Failed to read NBT data from {}: {} - Stack trace: {}", 
-                file, 
-                e.getMessage(),
-                Arrays.toString(e.getStackTrace()));
-            return null;
-        }
-    }
-    private void saveDifferences(List<String> differences) {
+    }  
+
+   private void saveDifferences(List<String> differences) {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter("differences.txt"))) {
             for (String difference : differences) {
                 writer.write(difference);

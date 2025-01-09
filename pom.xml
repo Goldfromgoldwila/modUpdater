@@ -46,21 +46,19 @@
             <version>3.1.0</version>
         </dependency>
 <dependency>
-            <groupId>com.github.Querz</groupId>
-            <artifactId>NBT</artifactId>
-            <version>6.1</version>
-        </dependency>
-
-    </dependencies>
+    <groupId>net.kyori</groupId>
+    <artifactId>adventure-nbt</artifactId>
+    <version>4.16.0</version>
+</dependency>
   
-   <repositories>
-        <!-- Add JitPack repository -->
-        <repository>
-            <id>jitpack.io</id>
-            <url>https://jitpack.io</url>
-        </repository>
-    </repositories>
+</dependencies>
 
+<repositories>
+    <repository>
+        <id>jitpack.io</id>
+        <url>https://jitpack.io</url>
+    </repository>
+</repositories>
 
     <build>
         <sourceDirectory>backend/src/main/java</sourceDirectory>
