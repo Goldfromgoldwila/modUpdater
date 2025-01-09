@@ -234,173 +234,87 @@ public class MinecraftVersionHandler {
             oldFile.toAbsolutePath(), 
             newFile.toAbsolutePath());
         
-        if (!isValidNbtFile(oldFile) || !isValidNbtFile(newFile)) {
-            LOGGER.warn("Invalid NBT file detected:\nOld: {}\nNew: {}", 
-                oldFile.toAbsolutePath(), 
-                newFile.toAbsolutePath());
-            return false;
-        }
-        
         try {
-            // Try different compression types
-            CompoundBinaryTag oldRoot = readNbtFileWithFallback(oldFile);
-            CompoundBinaryTag newRoot = readNbtFileWithFallback(newFile);
-            
-            if (oldRoot == null || newRoot == null) {
-                LOGGER.warn("Failed to read one or both NBT files:\nOld: {}\nNew: {}", 
-                    oldFile.toAbsolutePath(), 
-                    newFile.toAbsolutePath());
+            // Create a reader
+            BinaryTagIO.Reader reader = BinaryTagIO.reader();
+    
+            // Read both files
+            CompoundBinaryTag oldRoot = null;
+            CompoundBinaryTag newRoot = null;
+    
+            try {
+                oldRoot = reader.read(oldFile);
+            } catch (Exception e) {
+                LOGGER.warn("Failed to read old NBT file: {}", oldFile);
                 return false;
             }
-            
+    
+            try {
+                newRoot = reader.read(newFile);
+            } catch (Exception e) {
+                LOGGER.warn("Failed to read new NBT file: {}", newFile);
+                return false;
+            }
+    
+            if (oldRoot == null || newRoot == null) {
+                LOGGER.error("Failed to read NBT files");
+                return false;
+            }
+    
+            // Compare the NBT data
             return compareNbtTags(oldRoot, newRoot);
+    
         } catch (Exception e) {
-            LOGGER.error("Error comparing NBT files:\nOld: {}\nNew: {}\nError: {}", 
+            LOGGER.error("Error comparing NBT files: {} vs {}\nError: {} - Stack trace: {}", 
                 oldFile.toAbsolutePath(), 
                 newFile.toAbsolutePath(),
-                e.getMessage());
+                e.getMessage(),
+                Arrays.toString(e.getStackTrace()));
             return false;
         }
     }
-    
-    private CompoundBinaryTag readNbtFileWithFallback(Path file) {
-        // Try different compression types in order
-        BinaryTagIO.Compression[] compressionTypes = {
-            BinaryTagIO.Compression.GZIP,
-            BinaryTagIO.Compression.ZLIB,
-            BinaryTagIO.Compression.NONE
-        };
-    
-        for (BinaryTagIO.Compression compression : compressionTypes) {
-            try {
-                BinaryTagIO.Reader reader = BinaryTagIO.reader();
-                CompoundBinaryTag tag = reader.read(file);
-                if (tag != null) {
-                    LOGGER.debug("Successfully read NBT file {} with compression {}", 
-                        file.getFileName(), compression);
-                    return tag;
-                }
-            } catch (IOException e) {
-                LOGGER.debug("Failed to read NBT file {} with compression {}: {}", 
-                    file.getFileName(), compression, e.getMessage());
-            }
-        }
-        
-        LOGGER.error("Failed to read NBT file {} with all compression types", file.getFileName());
-        return null;
-    }
-    
-    private CompoundBinaryTag readNbtFile(Path file) {
-        try {
-            BinaryTagIO.Reader reader = BinaryTagIO.reader();
-            return reader.read(file);
-        } catch (IOException e) {
-            LOGGER.error("Failed to read NBT file {}: {} - Stack trace: {}", 
-                file, e.getMessage(), Arrays.toString(e.getStackTrace()));
-            return null;
-        }
-    }
-    
-    private boolean isValidNbtFile(Path file) {
-        try {
-            if (!Files.exists(file)) {
-                LOGGER.warn("File does not exist: {}", file.toAbsolutePath());
-                return false;
-            } 
-            
-            if (!Files.isRegularFile(file)) {
-                LOGGER.warn("Not a regular file: {}", file.toAbsolutePath());
-                return false;
-            }
-            
-            if (!Files.isReadable(file)) {
-                LOGGER.warn("File is not readable: {}", file.toAbsolutePath());
-                return false;
-            }
-            
-            long fileSize = Files.size(file);
-            if (fileSize == 0) {
-                LOGGER.warn("File is empty: {}", file.toAbsolutePath());
-                return false;
-            }
-            
-            // Try to read the file with different compression types
-            return readNbtFileWithFallback(file) != null;
-            
-        } catch (IOException e) {
-            LOGGER.error("Error validating NBT file {}: {}", file.toAbsolutePath(), e.getMessage());
-            return false;
-        }
-    }
-
     
     private boolean compareNbtTags(CompoundBinaryTag tag1, CompoundBinaryTag tag2) {
-        Set<String> keys1 = tag1.keySet();  // Changed from keys() to keySet()
-        
-        if (tag1.size() != tag2.size()) {
-            LOGGER.debug("NBT tags have different number of entries: {} vs {}", 
-                tag1.size(), tag2.size());
+        Set<String> keys1 = tag1.keySet();
+        Set<String> keys2 = tag2.keySet();
+    
+        if (!keys1.equals(keys2)) {
+            LOGGER.debug("NBT tags have different keys");
             return false;
         }
-        
+    
         for (String key : keys1) {
             BinaryTag value1 = tag1.get(key);
             BinaryTag value2 = tag2.get(key);
-            
-            if (value2 == null) {
-                LOGGER.debug("Key {} missing in second NBT file", key);
+    
+            if (value1 == null || value2 == null) {
                 return false;
             }
-            
-            if (!compareTagValues(value1, value2)) {
-                LOGGER.debug("Values differ for key {}: {} vs {}", 
-                    key, value1, value2);
+    
+            if (!value1.equals(value2)) {
+                LOGGER.debug("Values differ for key {}", key);
                 return false;
             }
         }
-        
+    
         return true;
     }
     
-    private boolean compareTagValues(BinaryTag tag1, BinaryTag tag2) {
-        if (tag1.type() != tag2.type()) {
+    private boolean isValidNbtFile(Path file) {
+        if (!Files.exists(file) || !Files.isRegularFile(file) || !Files.isReadable(file)) {
+            LOGGER.warn("Invalid file: {}", file.toAbsolutePath());
             return false;
         }
-        
-        // Replace switch with if-else for Java 8 compatibility
-        if (tag1 instanceof CompoundBinaryTag) {
-            return compareNbtTags((CompoundBinaryTag) tag1, (CompoundBinaryTag) tag2);
-        } else if (tag1 instanceof ListBinaryTag) {
-            return compareListTags((ListBinaryTag) tag1, (ListBinaryTag) tag2);
-        } else if (tag1 instanceof ByteArrayBinaryTag) {
-            return Arrays.equals(((ByteArrayBinaryTag) tag1).value(), 
-                               ((ByteArrayBinaryTag) tag2).value());
-        } else if (tag1 instanceof IntArrayBinaryTag) {
-            return Arrays.equals(((IntArrayBinaryTag) tag1).value(), 
-                               ((IntArrayBinaryTag) tag2).value());
-        } else if (tag1 instanceof LongArrayBinaryTag) {
-            return Arrays.equals(((LongArrayBinaryTag) tag1).value(), 
-                               ((LongArrayBinaryTag) tag2).value());
-        } else {
-            return tag1.equals(tag2);
-        }
-    }
     
-    private boolean compareListTags(ListBinaryTag list1, ListBinaryTag list2) {
-        if (list1.size() != list2.size()) {
+        try {
+            BinaryTagIO.Reader reader = BinaryTagIO.reader();
+            reader.read(file);
+            return true;
+        } catch (Exception e) {
+            LOGGER.warn("File is not a valid NBT file: {} - {}", file.toAbsolutePath(), e.getMessage());
             return false;
         }
-        
-        for (int i = 0; i < list1.size(); i++) {
-            if (!compareTagValues(list1.get(i), list2.get(i))) {
-                return false;
-            }
-        }
-        
-        return true;
     }
-    
-  
 
    private void saveDifferences(List<String> differences) {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter("differences.txt"))) {
