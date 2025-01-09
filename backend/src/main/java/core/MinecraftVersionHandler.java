@@ -251,20 +251,49 @@ public class MinecraftVersionHandler {
     private void compareFileContents(Path oldFile, Path newFile, ComparisonResult result) {
         try {
             String oldFileName = oldFile.getFileName().toString();
+            String oldPath = oldFile.toString();
+            String newPath = newFile.toString();
             long fileSize = Files.size(oldFile) + Files.size(newFile);
             metrics.addProcessedBytes(fileSize);
-
-            if (oldFileName.endsWith(".png")) {
+    
+            // Compare folder structure
+            String oldFolder = oldFile.getParent().toString();
+            String newFolder = newFile.getParent().toString();
+            if (!oldFolder.equals(newFolder)) {
+                result.addDifference("Folder structure changed: " + oldFolder + " -> " + newFolder);
+            }
+    
+            // Compare class files and their names
+            if (oldFileName.endsWith(".class")) {
+                String oldClassName = oldFileName.substring(0, oldFileName.length() - 6); // Remove .class
+                String newClassName = newFile.getFileName().toString();
+                newClassName = newClassName.substring(0, newClassName.length() - 6);
+    
+                if (!oldClassName.equals(newClassName)) {
+                    result.addDifference("Class renamed: " + oldClassName + " -> " + newClassName);
+                }
+    
+                // Compare class file contents
+                if (Files.mismatch(oldFile, newFile) != -1) {
+                    result.addDifference(String.format("Modified class: %s\n  - Old path: %s\n  - New path: %s", 
+                        oldClassName, oldPath, newPath));
+                    metrics.incrementModifiedFiles();
+                    metrics.recordFileTypeChange("class");
+                }
+            } 
+            // Handle other file types
+            else if (oldFileName.endsWith(".png")) {
                 handlePngComparison(oldFile, newFile, result);
-            } else if (oldFileName.endsWith(".class")) {
-                handleBinaryComparison(oldFile, newFile, result);
             } else if (oldFileName.endsWith(".nbt")) {
                 handleNbtComparison(oldFile, newFile, result);
             } else {
                 handleTextFileComparison(oldFile, newFile, result);
             }
+         // Log the comparison details
+         LOGGER.info("Compared files:\n  - Old: {}\n  - New: {}", oldPath, newPath);
+
         } catch (IOException e) {
-            LOGGER.error("Error comparing files: {}", e.getMessage());
+            LOGGER.error("Error comparing files: {} vs {}: {}", oldFile, newFile, e.getMessage());
         }
     }
 
@@ -325,31 +354,53 @@ public class MinecraftVersionHandler {
             .collect(Collectors.toList());
     }
 
-    private void generateDetailedReport(ComparisonResult result) {
-        try (BufferedWriter writer = Files.newBufferedWriter(Paths.get("detailed_report.txt"))) {
-            writer.write("Detailed Comparison Report\n\n");
-            
-            // Write differences
-            writer.write("Changes:\n");
-            for (String difference : result.getDifferences()) {
-                writer.write(difference + "\n");
+   
+private void generateDetailedReport(ComparisonResult result) {
+    try (BufferedWriter writer = Files.newBufferedWriter(Paths.get("detailed_report.txt"))) {
+        writer.write("=== Detailed Comparison Report ===\n\n");
+        
+        // Group changes by type
+        Map<String, List<String>> groupedChanges = result.getDifferences().stream()
+            .collect(Collectors.groupingBy(diff -> {
+                if (diff.startsWith("Added:")) return "Added Files";
+                if (diff.startsWith("Removed:")) return "Removed Files";
+                if (diff.startsWith("Modified class:")) return "Modified Classes";
+                if (diff.startsWith("Class renamed:")) return "Renamed Classes";
+                if (diff.startsWith("Folder structure changed:")) return "Folder Changes";
+                return "Other Changes";
+            }));
+
+        // Write each group
+        groupedChanges.forEach((group, changes) -> {
+            try {
+                writer.write(group + ":\n");
+                writer.write("-".repeat(group.length() + 1) + "\n");
+                changes.forEach(change -> {
+                    try {
+                        writer.write(change + "\n");
+                    } catch (IOException e) {
+                        LOGGER.error("Error writing change: {}", e.getMessage());
+                    }
+                });
+                writer.write("\n");
+            } catch (IOException e) {
+                LOGGER.error("Error writing group {}: {}", group, e.getMessage());
             }
-            
-            // Write renames
-            writer.write("\nRenamed Files:\n");
-            for (Map.Entry<String, String> rename : result.getRenames().entrySet()) {
-                writer.write(rename.getKey() + " -> " + rename.getValue() + "\n");
-            }
-            
-            // Write metrics
-            writer.write("\nMetrics:\n");
-            for (Map.Entry<String, Object> metric : result.getMetrics().entrySet()) {
-                writer.write(metric.getKey() + ": " + metric.getValue() + "\n");
-            }
-        } catch (IOException e) {
-            LOGGER.error("Error generating detailed report: {}", e.getMessage());
-        }
+        }); 
+          // Write metrics
+          writer.write("\n=== Metrics ===\n");
+          Map<String, Object> metrics = result.getMetrics();
+          writer.write(String.format("Total files processed: %d\n", metrics.get("totalFilesProcessed")));
+          writer.write(String.format("Added files: %d\n", metrics.get("addedFiles")));
+          writer.write(String.format("Removed files: %d\n", metrics.get("removedFiles")));
+          writer.write(String.format("Modified files: %d\n", metrics.get("modifiedFiles")));
+          writer.write(String.format("Processing time: %.2f seconds\n", metrics.get("processingTimeSeconds")));
+  
+      } catch (IOException e) {
+          LOGGER.error("Error generating detailed report: {}", e.getMessage());
+      }
     }
+
 
     private boolean comparePngFiles(Path oldFile, Path newFile) {
         LOGGER.info("Comparing PNG files: {} and {}", oldFile.getFileName(), newFile.getFileName());
@@ -398,59 +449,104 @@ public class MinecraftVersionHandler {
             return false;
         }
         
-        try (NBTInputStream oldNbtStream = new NBTInputStream(new BufferedInputStream(new FileInputStream(oldFile.toFile())));
-             NBTInputStream newNbtStream = new NBTInputStream(new BufferedInputStream(new FileInputStream(newFile.toFile())))) {
+        try (FileInputStream oldFis = new FileInputStream(oldFile.toFile());
+             FileInputStream newFis = new FileInputStream(newFile.toFile());
+             BufferedInputStream oldBis = new BufferedInputStream(oldFis);
+             BufferedInputStream newBis = new BufferedInputStream(newFis);
+             NBTInputStream oldNbtStream = new NBTInputStream(oldBis);
+             NBTInputStream newNbtStream = new NBTInputStream(newBis)) {
     
-            net.querz.nbt.io.NamedTag oldNamedTag = readNbtTag(oldNbtStream, oldFile);
-            net.querz.nbt.io.NamedTag newNamedTag = readNbtTag(newNbtStream, newFile);
+            // Read the root compound tags
+            CompoundTag oldRoot = readNbtRootTag(oldNbtStream, oldFile);
+            CompoundTag newRoot = readNbtRootTag(newNbtStream, newFile);
     
-            if (oldNamedTag == null || newNamedTag == null) {
+            if (oldRoot == null || newRoot == null) {
+                LOGGER.warn("One or both NBT files could not be read properly");
                 return false;
             }
     
-            boolean namesEqual = Objects.equals(oldNamedTag.getName(), newNamedTag.getName());
-            boolean tagsEqual = Objects.equals(oldNamedTag.getTag(), newNamedTag.getTag());
-    
-            if (!namesEqual || !tagsEqual) {
-                LOGGER.debug("NBT comparison failed - Names equal: {}, Tags equal: {}", namesEqual, tagsEqual);
-            }
-    
-            return namesEqual && tagsEqual;
-        } catch (IOException e) {
-            LOGGER.error("Error reading NBT files: {} - {} - Stack trace: {}", e.getMessage(), e.getClass().getSimpleName(), Arrays.toString(e.getStackTrace()));
+            return compareNbtTags(oldRoot, newRoot);
+        } catch (Exception e) {
+            LOGGER.error("Error comparing NBT files: {} and {} - Error: {} - Stack trace: {}", 
+                oldFile, newFile, e.getMessage(), Arrays.toString(e.getStackTrace()));
             return false;
         }
     }
     
-    private boolean isValidNbtFile(Path file) {
+    private CompoundTag readNbtRootTag(NBTInputStream stream, Path file) {
         try {
-            String fileName = file.getFileName().toString().toLowerCase();
-            boolean isValid = fileName.endsWith(".nbt") && Files.exists(file) && Files.isRegularFile(file) && Files.isReadable(file) && Files.size(file) > 0;
-    
-            if (!isValid) {
-                LOGGER.warn("NBT file validation failed for {}: exists={}, isFile={}, isReadable={}, size={}", file, Files.exists(file), Files.isRegularFile(file), Files.isReadable(file), Files.size(file));
-            }
-            return isValid;
-        } catch (IOException e) {
-            LOGGER.error("Error validating NBT file {}: {}", file, e.getMessage());
-            return false;
-        }
-    }
-    
-    private net.querz.nbt.io.NamedTag readNbtTag(NBTInputStream stream, Path file) {
-        try {
-            net.querz.nbt.io.NamedTag tag = stream.readTag(8192); // Add depth parameter
-            if (tag == null || tag.getTag() == null) {
-                LOGGER.error("Null tag or inner tag read from NBT file: {}", file);
+            // Add the required depth parameter (e.g., 8192)
+            net.querz.nbt.io.NamedTag namedTag = stream.readTag(8192);
+            if (namedTag == null) {
+                LOGGER.error("Null named tag read from NBT file: {}", file);
                 return null;
             }
-            LOGGER.debug("Successfully read NBT tag from {}: name={}, tag type={}", 
-                file, tag.getName(), tag.getTag().getClass().getSimpleName());
-            return tag;
+            
+            if (!(namedTag.getTag() instanceof CompoundTag)) {
+                LOGGER.error("Root tag is not a CompoundTag in file: {}", file);
+                return null;
+            }
+            
+            return (CompoundTag) namedTag.getTag();
         } catch (IOException e) {
             LOGGER.error("Failed to read NBT data from {}: {} - Stack trace: {}", 
                 file, e.getMessage(), Arrays.toString(e.getStackTrace()));
             return null;
+        }
+    }
+    
+    private boolean compareNbtTags(CompoundTag tag1, CompoundTag tag2) {
+        // First compare the key sets
+        if (!tag1.keySet().equals(tag2.keySet())) {
+            LOGGER.debug("NBT tags have different keys");
+            return false;
+        }
+    
+        // Then compare each value
+        for (String key : tag1.keySet()) {
+            if (!Objects.equals(tag1.get(key), tag2.get(key))) {
+                LOGGER.debug("NBT tags differ at key: {}", key);
+                return false;
+            }
+        }
+    
+        return true;
+    }
+    
+    private boolean isValidNbtFile(Path file) {
+        try {
+            if (!Files.exists(file)) {
+                LOGGER.warn("NBT file does not exist: {}", file);
+                return false;
+            }
+            
+            if (!Files.isRegularFile(file)) {
+                LOGGER.warn("Not a regular file: {}", file);
+                return false;
+            }
+            
+            if (!Files.isReadable(file)) {
+                LOGGER.warn("File is not readable: {}", file);
+                return false;
+            }
+            
+            long fileSize = Files.size(file);
+            if (fileSize == 0) {
+                LOGGER.warn("File is empty: {}", file);
+                return false;
+            }
+            
+            // Check file extension
+            String fileName = file.getFileName().toString().toLowerCase();
+            if (!fileName.endsWith(".nbt")) {
+                LOGGER.warn("File does not have .nbt extension: {}", file);
+                return false;
+            }
+            
+            return true;
+        } catch (IOException e) {
+            LOGGER.error("Error validating NBT file {}: {}", file, e.getMessage());
+            return false;
         }
     }
     
