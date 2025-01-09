@@ -228,50 +228,41 @@ public class MinecraftVersionHandler {
     private boolean colorsAreEqual(Color color1, Color color2) {
         return color1.getRGB() == color2.getRGB();
     }
-    
-    private boolean compareNbtFiles(Path oldFile, Path newFile) {
-        LOGGER.info("Comparing NBT files:\nOld: {}\nNew: {}", 
-            oldFile.toAbsolutePath(), 
-            newFile.toAbsolutePath());
+
+    private CompoundBinaryTag readNbtWithFallback(Path file) {
+        // Try different combinations of compression and settings
+        List<BinaryTagIO.Reader> readers = new ArrayList<>();
         
-        try {
-            // Create a reader
-            BinaryTagIO.Reader reader = BinaryTagIO.reader();
-    
-            // Read both files
-            CompoundBinaryTag oldRoot = null;
-            CompoundBinaryTag newRoot = null;
-    
+        // Add different reader configurations
+        readers.add(BinaryTagIO.reader()); // Default reader
+        readers.add(BinaryTagIO.unlimitedReader()); // Unlimited size reader
+        
+        for (BinaryTagIO.Reader reader : readers) {
             try {
-                oldRoot = reader.read(oldFile);
+                // Try reading directly
+                CompoundBinaryTag tag = reader.read(file);
+                if (tag != null) {
+                    LOGGER.debug("Successfully read NBT file: {}", file);
+                    return tag;
+                }
             } catch (Exception e) {
-                LOGGER.warn("Failed to read old NBT file: {}", oldFile);
-                return false;
+                LOGGER.debug("Failed attempt to read NBT file {}: {}", file, e.getMessage());
+                
+                // Try reading with buffered input stream
+                try (BufferedInputStream bis = new BufferedInputStream(Files.newInputStream(file))) {
+                    CompoundBinaryTag tag = reader.read(bis);
+                    if (tag != null) {
+                        LOGGER.debug("Successfully read NBT file with buffered stream: {}", file);
+                        return tag;
+                    }
+                } catch (Exception e2) {
+                    LOGGER.debug("Failed buffered attempt to read NBT file {}: {}", file, e2.getMessage());
+                }
             }
-    
-            try {
-                newRoot = reader.read(newFile);
-            } catch (Exception e) {
-                LOGGER.warn("Failed to read new NBT file: {}", newFile);
-                return false;
-            }
-    
-            if (oldRoot == null || newRoot == null) {
-                LOGGER.error("Failed to read NBT files");
-                return false;
-            }
-    
-            // Compare the NBT data
-            return compareNbtTags(oldRoot, newRoot);
-    
-        } catch (Exception e) {
-            LOGGER.error("Error comparing NBT files: {} vs {}\nError: {} - Stack trace: {}", 
-                oldFile.toAbsolutePath(), 
-                newFile.toAbsolutePath(),
-                e.getMessage(),
-                Arrays.toString(e.getStackTrace()));
-            return false;
         }
+        
+        LOGGER.error("All attempts to read NBT file failed: {}", file);
+        return null;
     }
     
     private boolean compareNbtTags(CompoundBinaryTag tag1, CompoundBinaryTag tag2) {
@@ -279,7 +270,7 @@ public class MinecraftVersionHandler {
         Set<String> keys2 = tag2.keySet();
     
         if (!keys1.equals(keys2)) {
-            LOGGER.debug("NBT tags have different keys");
+            LOGGER.debug("NBT tags have different keys:\nTag1 keys: {}\nTag2 keys: {}", keys1, keys2);
             return false;
         }
     
@@ -288,11 +279,12 @@ public class MinecraftVersionHandler {
             BinaryTag value2 = tag2.get(key);
     
             if (value1 == null || value2 == null) {
+                LOGGER.debug("Null value found for key: {}", key);
                 return false;
             }
     
             if (!value1.equals(value2)) {
-                LOGGER.debug("Values differ for key {}", key);
+                LOGGER.debug("Values differ for key {}:\nValue1: {}\nValue2: {}", key, value1, value2);
                 return false;
             }
         }
@@ -307,15 +299,41 @@ public class MinecraftVersionHandler {
         }
     
         try {
-            BinaryTagIO.Reader reader = BinaryTagIO.reader();
-            reader.read(file);
-            return true;
+            return readNbtWithFallback(file) != null;
         } catch (Exception e) {
             LOGGER.warn("File is not a valid NBT file: {} - {}", file.toAbsolutePath(), e.getMessage());
             return false;
         }
     }
-
+    
+    private boolean compareNbtFiles(Path oldFile, Path newFile) {
+        LOGGER.info("Comparing NBT files:\nOld: {}\nNew: {}", 
+            oldFile.toAbsolutePath(), 
+            newFile.toAbsolutePath());
+        
+        try {
+            CompoundBinaryTag oldRoot = readNbtWithFallback(oldFile);
+            if (oldRoot == null) {
+                LOGGER.error("Failed to read old NBT file after all attempts: {}", oldFile);
+                return false;
+            }
+    
+            CompoundBinaryTag newRoot = readNbtWithFallback(newFile);
+            if (newRoot == null) {
+                LOGGER.error("Failed to read new NBT file after all attempts: {}", newFile);
+                return false;
+            }
+    
+            return compareNbtTags(oldRoot, newRoot);
+        } catch (Exception e) {
+            LOGGER.error("Error comparing NBT files: {} vs {}\nError: {} - Stack trace: {}", 
+                oldFile.toAbsolutePath(), 
+                newFile.toAbsolutePath(),
+                e.getMessage(),
+                Arrays.toString(e.getStackTrace()));
+            return false;
+        }
+    }
    private void saveDifferences(List<String> differences) {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter("differences.txt"))) {
             for (String difference : differences) {
