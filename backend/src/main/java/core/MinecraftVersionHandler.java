@@ -21,6 +21,10 @@ import net.kyori.adventure.nbt.ByteArrayBinaryTag;
 import net.kyori.adventure.nbt.IntArrayBinaryTag;
 import net.kyori.adventure.nbt.LongArrayBinaryTag;
 
+import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
+
+
 public class MinecraftVersionHandler {
     private static final Logger LOGGER = LoggerFactory.getLogger(MinecraftVersionHandler.class);
     private static final String DECOMPILED_DIR = "versions";
@@ -229,48 +233,17 @@ public class MinecraftVersionHandler {
         return color1.getRGB() == color2.getRGB();
     }
 
-    private CompoundBinaryTag readNbtWithFallback(Path file) {
-        // Try different combinations of compression and settings
-        List<BinaryTagIO.Reader> readers = new ArrayList<>();
-        
-        // Add different reader configurations
-        readers.add(BinaryTagIO.reader()); // Default reader
-        readers.add(BinaryTagIO.unlimitedReader()); // Unlimited size reader
-        
-        for (BinaryTagIO.Reader reader : readers) {
-            try {
-                // Try reading directly
-                CompoundBinaryTag tag = reader.read(file);
-                if (tag != null) {
-                    LOGGER.debug("Successfully read NBT file: {}", file);
-                    return tag;
-                }
-            } catch (Exception e) {
-                LOGGER.debug("Failed attempt to read NBT file {}: {}", file, e.getMessage());
-                
-                // Try reading with buffered input stream
-                try (BufferedInputStream bis = new BufferedInputStream(Files.newInputStream(file))) {
-                    CompoundBinaryTag tag = reader.read(bis);
-                    if (tag != null) {
-                        LOGGER.debug("Successfully read NBT file with buffered stream: {}", file);
-                        return tag;
-                    }
-                } catch (Exception e2) {
-                    LOGGER.debug("Failed buffered attempt to read NBT file {}: {}", file, e2.getMessage());
-                }
-            }
-        }
-        
-        LOGGER.error("All attempts to read NBT file failed: {}", file);
-        return null;
-    }
-    
+
     private boolean compareNbtTags(CompoundBinaryTag tag1, CompoundBinaryTag tag2) {
+        if (tag1 == null || tag2 == null) {
+            return false;
+        }
+    
         Set<String> keys1 = tag1.keySet();
         Set<String> keys2 = tag2.keySet();
     
         if (!keys1.equals(keys2)) {
-            LOGGER.debug("NBT tags have different keys:\nTag1 keys: {}\nTag2 keys: {}", keys1, keys2);
+            LOGGER.debug("NBT tags have different keys");
             return false;
         }
     
@@ -279,17 +252,116 @@ public class MinecraftVersionHandler {
             BinaryTag value2 = tag2.get(key);
     
             if (value1 == null || value2 == null) {
-                LOGGER.debug("Null value found for key: {}", key);
                 return false;
             }
     
-            if (!value1.equals(value2)) {
-                LOGGER.debug("Values differ for key {}:\nValue1: {}\nValue2: {}", key, value1, value2);
+            if (!compareNbtValues(value1, value2)) {
+                LOGGER.debug("Values differ for key: {}", key);
                 return false;
             }
         }
     
         return true;
+    }
+
+
+    private boolean compareNbtValues(BinaryTag tag1, BinaryTag tag2) {
+        if (tag1.getClass() != tag2.getClass()) {
+            return false;
+        }
+    
+        if (tag1 instanceof CompoundBinaryTag) {
+            return compareNbtTags((CompoundBinaryTag) tag1, (CompoundBinaryTag) tag2);
+        }
+    
+        if (tag1 instanceof ListBinaryTag) {
+            ListBinaryTag list1 = (ListBinaryTag) tag1;
+            ListBinaryTag list2 = (ListBinaryTag) tag2;
+    
+            if (list1.size() != list2.size()) {
+                return false;
+            }
+    
+            for (int i = 0; i < list1.size(); i++) {
+                if (!compareNbtValues(list1.get(i), list2.get(i))) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    
+        return tag1.equals(tag2);
+    }
+    private CompoundBinaryTag readNbtWithFallback(Path file) {
+        if (!Files.exists(file)) {
+            LOGGER.error("File not found: {}", file);
+            return null;
+        }
+    
+        List<BinaryTagIO.Reader> readers = new ArrayList<>();
+        readers.add(BinaryTagIO.reader());        // Default reader
+        readers.add(BinaryTagIO.unlimitedReader()); // Unlimited reader
+    
+        String errorMessages = "";
+        for (BinaryTagIO.Reader reader : readers) {
+            // Try raw read first
+            try (InputStream is = new BufferedInputStream(
+                    Files.newInputStream(file), 32 * 1024 * 1024)) {
+                CompoundBinaryTag tag = reader.read(is);
+                if (tag != null) {
+                    LOGGER.info("Read NBT file directly: {}", file);
+                    return tag;
+                }
+            } catch (Exception e) {
+                errorMessages += "\nDirect read failed: " + e.getMessage();
+            }
+    
+            // Try GZIP
+            try (InputStream is = Files.newInputStream(file);
+                 BufferedInputStream bis = new BufferedInputStream(is, 32 * 1024 * 1024);
+                 GZIPInputStream gzis = new GZIPInputStream(bis, 32 * 1024 * 1024)) {
+                CompoundBinaryTag tag = reader.read(gzis);
+                if (tag != null) {
+                    LOGGER.info("Read compressed NBT file: {}", file);
+                    return tag;
+                }
+            } catch (Exception e) {
+                errorMessages += "\nGZIP read failed: " + e.getMessage();
+            }
+        }
+    
+        LOGGER.error("Failed to read NBT file: {} - Errors: {}", file, errorMessages);
+        return null;
+    }
+    
+    private boolean compareNbtFiles(Path oldFile, Path newFile) {
+        try {
+            LOGGER.info("Starting NBT comparison:\nOld: {}\nNew: {}", 
+                oldFile.toAbsolutePath(), newFile.toAbsolutePath());
+    
+            if (!isValidNbtFile(oldFile)) {
+                LOGGER.error("Invalid old NBT file: {}", oldFile);
+                return false;
+            }
+    
+            if (!isValidNbtFile(newFile)) {
+                LOGGER.error("Invalid new NBT file: {}", newFile);
+                return false;
+            }
+    
+            CompoundBinaryTag oldRoot = readNbtWithFallback(oldFile);
+            CompoundBinaryTag newRoot = readNbtWithFallback(newFile);
+    
+            if (oldRoot == null || newRoot == null) {
+                return false;
+            }
+    
+            return compareNbtTags(oldRoot, newRoot);
+        } catch (Exception e) {
+            LOGGER.error("Comparison failed: {} vs {} - Error: {}", 
+                oldFile, newFile, e.getMessage(), e);
+            return false;
+        }
     }
     
     private boolean isValidNbtFile(Path file) {
@@ -306,34 +378,7 @@ public class MinecraftVersionHandler {
         }
     }
     
-    private boolean compareNbtFiles(Path oldFile, Path newFile) {
-        LOGGER.info("Comparing NBT files:\nOld: {}\nNew: {}", 
-            oldFile.toAbsolutePath(), 
-            newFile.toAbsolutePath());
-        
-        try {
-            CompoundBinaryTag oldRoot = readNbtWithFallback(oldFile);
-            if (oldRoot == null) {
-                LOGGER.error("Failed to read old NBT file after all attempts: {}", oldFile);
-                return false;
-            }
-    
-            CompoundBinaryTag newRoot = readNbtWithFallback(newFile);
-            if (newRoot == null) {
-                LOGGER.error("Failed to read new NBT file after all attempts: {}", newFile);
-                return false;
-            }
-    
-            return compareNbtTags(oldRoot, newRoot);
-        } catch (Exception e) {
-            LOGGER.error("Error comparing NBT files: {} vs {}\nError: {} - Stack trace: {}", 
-                oldFile.toAbsolutePath(), 
-                newFile.toAbsolutePath(),
-                e.getMessage(),
-                Arrays.toString(e.getStackTrace()));
-            return false;
-        }
-    }
+   
    private void saveDifferences(List<String> differences) {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter("differences.txt"))) {
             for (String difference : differences) {
