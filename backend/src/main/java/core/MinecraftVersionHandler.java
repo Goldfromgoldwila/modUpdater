@@ -235,33 +235,17 @@ public class MinecraftVersionHandler {
 
 
     private boolean compareNbtTags(CompoundBinaryTag tag1, CompoundBinaryTag tag2) {
-        if (tag1 == null || tag2 == null) {
+        // Quick size check first
+        if (tag1.size() != tag2.size()) {
             return false;
         }
     
-        Set<String> keys1 = tag1.keySet();
-        Set<String> keys2 = tag2.keySet();
-    
-        if (!keys1.equals(keys2)) {
-            LOGGER.debug("NBT tags have different keys");
-            return false;
-        }
-    
-        for (String key : keys1) {
+        // Use parallel stream for faster processing of large tag sets
+        return tag1.keySet().parallelStream().allMatch(key -> {
             BinaryTag value1 = tag1.get(key);
             BinaryTag value2 = tag2.get(key);
-    
-            if (value1 == null || value2 == null) {
-                return false;
-            }
-    
-            if (!compareNbtValues(value1, value2)) {
-                LOGGER.debug("Values differ for key: {}", key);
-                return false;
-            }
-        }
-    
-        return true;
+            return value1 != null && value2 != null && compareNbtValues(value1, value2);
+        });
     }
 
 
@@ -294,61 +278,45 @@ public class MinecraftVersionHandler {
     }
     private CompoundBinaryTag readNbtWithFallback(Path file) {
         if (!Files.exists(file)) {
-            LOGGER.error("File not found: {}", file);
             return null;
         }
     
-        List<BinaryTagIO.Reader> readers = new ArrayList<>();
-        readers.add(BinaryTagIO.reader());        // Default reader
-        readers.add(BinaryTagIO.unlimitedReader()); // Unlimited reader
+        // Use a single buffered reader with larger buffer
+        try (BufferedInputStream bis = new BufferedInputStream(
+                Files.newInputStream(file), 1024 * 1024)) { // 1MB buffer
+            
+            bis.mark(4); // Mark the start to check for GZIP magic number
+            int magic1 = bis.read();
+            int magic2 = bis.read();
+            bis.reset();
     
-        String errorMessages = "";
-        for (BinaryTagIO.Reader reader : readers) {
-            // Try raw read first
-            try (InputStream is = new BufferedInputStream(
-                    Files.newInputStream(file), 32 * 1024 * 1024)) {
-                CompoundBinaryTag tag = reader.read(is);
-                if (tag != null) {
-                    LOGGER.info("Read NBT file directly: {}", file);
-                    return tag;
+            // Check if it's a GZIP file
+            if (magic1 == 0x1f && magic2 == 0x8b) {
+                try (GZIPInputStream gzis = new GZIPInputStream(bis, 1024 * 1024)) {
+                    return BinaryTagIO.reader().read(gzis);
                 }
-            } catch (Exception e) {
-                errorMessages += "\nDirect read failed: " + e.getMessage();
+            } else {
+                return BinaryTagIO.reader().read(bis);
             }
-    
-            // Try GZIP
-            try (InputStream is = Files.newInputStream(file);
-                 BufferedInputStream bis = new BufferedInputStream(is, 32 * 1024 * 1024);
-                 GZIPInputStream gzis = new GZIPInputStream(bis, 32 * 1024 * 1024)) {
-                CompoundBinaryTag tag = reader.read(gzis);
-                if (tag != null) {
-                    LOGGER.info("Read compressed NBT file: {}", file);
-                    return tag;
-                }
-            } catch (Exception e) {
-                errorMessages += "\nGZIP read failed: " + e.getMessage();
-            }
+        } catch (Exception e) {
+            LOGGER.debug("Failed to read NBT file: {} - {}", file, e.getMessage());
+            return null;
         }
-    
-        LOGGER.error("Failed to read NBT file: {} - Errors: {}", file, errorMessages);
-        return null;
     }
+    
     
     private boolean compareNbtFiles(Path oldFile, Path newFile) {
         try {
-            LOGGER.info("Starting NBT comparison:\nOld: {}\nNew: {}", 
-                oldFile.toAbsolutePath(), newFile.toAbsolutePath());
-    
-            if (!isValidNbtFile(oldFile)) {
-                LOGGER.error("Invalid old NBT file: {}", oldFile);
-                return false;
+            // First do a quick size and hash comparison
+            if (Files.size(oldFile) == Files.size(newFile)) {
+                String hash1 = computeQuickHash(oldFile);
+                String hash2 = computeQuickHash(newFile);
+                if (hash1.equals(hash2)) {
+                    return true; // Files are identical
+                }
             }
     
-            if (!isValidNbtFile(newFile)) {
-                LOGGER.error("Invalid new NBT file: {}", newFile);
-                return false;
-            }
-    
+            // Only do detailed NBT comparison if quick comparison fails
             CompoundBinaryTag oldRoot = readNbtWithFallback(oldFile);
             CompoundBinaryTag newRoot = readNbtWithFallback(newFile);
     
@@ -359,11 +327,23 @@ public class MinecraftVersionHandler {
             return compareNbtTags(oldRoot, newRoot);
         } catch (Exception e) {
             LOGGER.error("Comparison failed: {} vs {} - Error: {}", 
-                oldFile, newFile, e.getMessage(), e);
+                oldFile, newFile, e.getMessage());
             return false;
         }
     }
-    
+    private String computeQuickHash(Path file) throws IOException {
+        try (InputStream is = Files.newInputStream(file)) {
+            MessageDigest digest = MessageDigest.getInstance("MD5"); // Using MD5 for speed
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = is.read(buffer)) > 0) {
+                digest.update(buffer, 0, read);
+            }
+            return Base64.getEncoder().encodeToString(digest.digest());
+        } catch (NoSuchAlgorithmException e) {
+            throw new IOException(e);
+        }
+    }
     private boolean isValidNbtFile(Path file) {
         if (!Files.exists(file) || !Files.isRegularFile(file) || !Files.isReadable(file)) {
             LOGGER.warn("Invalid file: {}", file.toAbsolutePath());
