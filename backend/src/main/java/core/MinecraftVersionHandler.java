@@ -474,28 +474,42 @@ public class MinecraftVersionHandler {
 
     private void performFullComparison(File oldDir, File newDir, ComparisonResult result) {
         try {
+            LOGGER.info("Starting full comparison between directories");
             Set<Path> oldFiles = new HashSet<>();
             Set<Path> newFiles = new HashSet<>();
             
-            // Collect all files
+            LOGGER.info("Collecting files from old directory...");
             walkDirectory(oldDir.toPath(), path -> 
                 oldFiles.add(oldDir.toPath().relativize(path)));
+            
+            LOGGER.info("Collecting files from new directory...");
             walkDirectory(newDir.toPath(), path -> 
                 newFiles.add(newDir.toPath().relativize(path)));
             
-            // Find added and removed files
+            LOGGER.info("Found {} files in old directory, {} files in new directory",
+                oldFiles.size(), newFiles.size());
+            
+            // Process differences
             Set<Path> added = new HashSet<>(newFiles);
             added.removeAll(oldFiles);
-            added.forEach(path -> result.addAddedFile(path.toString()));
+            added.forEach(path -> {
+                LOGGER.debug("Added file: {}", path);
+                result.addAddedFile(path.toString());
+            });
             
             Set<Path> removed = new HashSet<>(oldFiles);
             removed.removeAll(newFiles);
-            removed.forEach(path -> result.addRemovedFile(path.toString()));
+            removed.forEach(path -> {
+                LOGGER.debug("Removed file: {}", path);
+                result.addRemovedFile(path.toString());
+            });
             
-            // Compare common files
             Set<Path> common = new HashSet<>(oldFiles);
             common.retainAll(newFiles);
-            common.forEach(path -> {
+            LOGGER.info("Processing {} common files for modifications", common.size());
+            
+            int processed = 0;
+            for (Path path : common) {
                 try {
                     compareSingleFile(
                         oldDir.toPath().resolve(path),
@@ -503,10 +517,17 @@ public class MinecraftVersionHandler {
                         path.toString(),
                         result
                     );
+                    processed++;
+                    if (processed % 100 == 0) {
+                        LOGGER.info("Processed {}/{} common files", processed, common.size());
+                    }
                 } catch (IOException e) {
                     LOGGER.error("Error comparing file: {}", path, e);
                 }
-            });
+            }
+            
+            LOGGER.info("Full comparison completed successfully");
+            
         } catch (Exception e) {
             LOGGER.error("Error during full comparison", e);
             throw new ComparisonException("Failed to perform full comparison", e);
