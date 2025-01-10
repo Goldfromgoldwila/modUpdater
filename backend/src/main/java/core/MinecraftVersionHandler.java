@@ -31,6 +31,7 @@ import java.util.stream.Stream;
 import java.io.UncheckedIOException;
 import java.util.concurrent.TimeUnit;
 import java.nio.file.Paths;
+import org.springframework.beans.factory.annotation.Autowired;
 
 @Component
 @Validated
@@ -52,7 +53,11 @@ public class MinecraftVersionHandler {
     private final ValidationService validationService;
     private final DiffGenerator diffGenerator;
 
-    public MinecraftVersionHandler(FileCache fileCache, ValidationService validationService, DiffGenerator diffGenerator) {
+    @Autowired
+    public MinecraftVersionHandler(
+            FileCache fileCache,
+            ValidationService validationService,
+            DiffGenerator diffGenerator) {
         this.fileCache = fileCache;
         this.validationService = validationService;
         this.diffGenerator = diffGenerator;
@@ -244,6 +249,9 @@ public class MinecraftVersionHandler {
 
     @Component
     public static class FileCache {
+        @Autowired
+        private MinecraftVersionHandler minecraftVersionHandler;  // If needed
+        
         private final Map<Path, CacheEntry> cache = new ConcurrentHashMap<>();
         
         public String getFileHash(Path path) throws IOException {
@@ -285,6 +293,9 @@ public class MinecraftVersionHandler {
 
     @Component
     public static class ValidationService {
+        @Autowired
+        private MinecraftVersionHandler minecraftVersionHandler;  // If needed
+        
         public boolean isValidVersion(String version) {
             return version != null && version.matches("^[0-9]+(\\.[0-9]+)*$");
         }
@@ -292,6 +303,9 @@ public class MinecraftVersionHandler {
 
     @Component
     public static class DiffGenerator {
+        @Autowired
+        private MinecraftVersionHandler minecraftVersionHandler;  // If needed
+        
         public String generateTextDiff(Path oldPath, Path newPath) throws IOException {
             List<String> oldLines = Files.readAllLines(oldPath);
             List<String> newLines = Files.readAllLines(newPath);
