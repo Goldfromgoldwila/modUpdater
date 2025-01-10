@@ -51,14 +51,12 @@ public class ExtractJson {
 
     private String cleanVersion;
 
-    @Autowired
-    private MinecraftVersionHandler.FileCache fileCache;
+    private final MinecraftVersionHandler versionHandler;
 
     @Autowired
-    private MinecraftVersionHandler.ValidationService validationService;
-
-    @Autowired
-    private MinecraftVersionHandler.DiffGenerator diffGenerator;
+    public ExtractJson(MinecraftVersionHandler versionHandler) {
+        this.versionHandler = versionHandler;
+    }
 
     public void processMod(String mcVersion) {
         try {
@@ -219,7 +217,6 @@ public class ExtractJson {
 
     private void triggerVersionComparison() {
         LOGGER.info("Triggering comparison between cleanVersion: {} and mcVersion: {}", cleanVersion, mcVersion);
-        MinecraftVersionHandler versionHandler = new MinecraftVersionHandler(fileCache, validationService, diffGenerator);
         versionHandler.compareMinecraftVersions(cleanVersion, mcVersion);
     }
 
