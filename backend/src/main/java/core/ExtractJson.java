@@ -3,6 +3,7 @@ package core;
 import com.google.gson.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -50,6 +51,14 @@ public class ExtractJson {
 
     private String cleanVersion;
 
+    @Autowired
+    private MinecraftVersionHandler.FileCache fileCache;
+
+    @Autowired
+    private MinecraftVersionHandler.ValidationService validationService;
+
+    @Autowired
+    private MinecraftVersionHandler.DiffGenerator diffGenerator;
 
     public void processMod(String mcVersion) {
         try {
@@ -210,7 +219,7 @@ public class ExtractJson {
 
     private void triggerVersionComparison() {
         LOGGER.info("Triggering comparison between cleanVersion: {} and mcVersion: {}", cleanVersion, mcVersion);
-        MinecraftVersionHandler versionHandler = new MinecraftVersionHandler();
+        MinecraftVersionHandler versionHandler = new MinecraftVersionHandler(fileCache, validationService, diffGenerator);
         versionHandler.compareMinecraftVersions(cleanVersion, mcVersion);
     }
 

@@ -50,8 +50,21 @@
     <artifactId>adventure-nbt</artifactId>
     <version>4.16.0</version>
 </dependency>
-  
-</dependencies>
+
+        <!-- Jakarta Validation API -->
+        <dependency>
+            <groupId>jakarta.validation</groupId>
+            <artifactId>jakarta.validation-api</artifactId>
+            <version>3.0.2</version>
+        </dependency>
+        
+        <!-- java-diff-utils -->
+        <dependency>
+            <groupId>io.github.java-diff-utils</groupId>
+            <artifactId>java-diff-utils</artifactId>
+            <version>4.12</version>
+        </dependency>
+    </dependencies>
 
 <repositories>
     <repository>
