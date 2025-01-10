@@ -32,6 +32,7 @@ import java.io.UncheckedIOException;
 import java.util.concurrent.TimeUnit;
 import java.nio.file.Paths;
 import org.springframework.beans.factory.annotation.Autowired;
+import java.io.Serializable;
 
 @Component
 @Validated
@@ -423,7 +424,9 @@ public class MinecraftVersionHandler {
         // Add getters/setters as needed
     }
 
-    public class ComparisonState {
+    public static class ComparisonState implements Serializable {
+        private static final long serialVersionUID = 1L;
+        
         private Map<String, String> fileHashes;
         private long timestamp;
         
@@ -432,16 +435,16 @@ public class MinecraftVersionHandler {
             this.timestamp = System.currentTimeMillis();
         }
         
+        public void setFileHashes(Map<String, String> fileHashes) {
+            this.fileHashes = new HashMap<>(fileHashes);
+        }
+        
         public Map<String, String> getFileHashes() {
-            return fileHashes;
+            return new HashMap<>(fileHashes);
         }
         
         public long getTimestamp() {
             return timestamp;
-        }
-        
-        public void setFileHashes(Map<String, String> fileHashes) {
-            this.fileHashes = fileHashes;
         }
         
         public void setTimestamp(long timestamp) {
