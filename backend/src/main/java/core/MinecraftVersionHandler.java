@@ -8,6 +8,14 @@ import org.springframework.cache.annotation.CacheConfig;
 import org.springframework.validation.annotation.Validated;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
+
+import com.github.difflib.DiffUtils;
+import com.github.difflib.patch.Patch;
+import com.github.difflib.patch.AbstractDelta;
+import com.github.difflib.patch.DeltaType;
+import com.github.difflib.text.DiffRow;
+import com.github.difflib.text.DiffRowGenerator;
+
 import java.io.*;
 import java.nio.file.*;
 import java.security.MessageDigest;
@@ -16,23 +24,23 @@ import java.util.*;
 import java.util.stream.Collectors;
 import java.util.function.Consumer;
 import java.util.concurrent.ConcurrentHashMap;
-import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
-import java.awt.Color;
-import net.kyori.adventure.nbt.*;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
-import com.github.difflib.DiffUtils;
-import com.github.difflib.patch.Patch;
-import com.github.difflib.patch.AbstractDelta;
-import com.github.difflib.text.DiffRow;
-import com.github.difflib.text.DiffRowGenerator;
-import java.util.stream.Stream;
-import java.io.UncheckedIOException;
 import java.util.concurrent.TimeUnit;
-import java.nio.file.Paths;
 import org.springframework.beans.factory.annotation.Autowired;
+import java.awt.Color;
+import java.awt.image.BufferedImage;
+import javax.imageio.ImageIO;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.io.Serializable;
+import java.io.BufferedInputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.stream.Stream;
 
 @Component
 @Validated
@@ -43,8 +51,8 @@ public class MinecraftVersionHandler {
     private static final String ASSETS_DIR = "assets";
     private static final String NBT_DIR = "data";
     private static final String CACHE_DIR = "cache";
-    private static final int LARGE_FILE_THRESHOLD = 10 * 1024 * 1024; // 10MB
-    private static final int CHUNK_SIZE = 1024 * 1024; // 1MB chunks for large files
+    private static final int LARGE_FILE_THRESHOLD = 10 * 2048 * 2048; // 20MB
+    private static final int CHUNK_SIZE = 2048 * 2048; // 2MB chunks for large files
 
     private final Map<String, FileComparison> fileComparisons = new ConcurrentHashMap<>();
     private final Set<String> addedFiles = ConcurrentHashMap.newKeySet();
@@ -139,49 +147,118 @@ public class MinecraftVersionHandler {
     }
 
     private void compareSingleFile(Path oldPath, Path newPath, String relativePath, ComparisonResult result) throws IOException {
-        LOGGER.debug("Comparing file: {}", relativePath);
-        
-        // Check if files exist
-        if (!Files.exists(oldPath) && Files.exists(newPath)) {
-            LOGGER.info("New file added: {}", relativePath);
-            result.addAddedFile(relativePath);
-            return;
-        }
-        if (Files.exists(oldPath) && !Files.exists(newPath)) {
-            LOGGER.info("File removed: {}", relativePath);
-            result.addRemovedFile(relativePath);
-            return;
-        }
-        
-        // Compare file sizes
-        long oldSize = Files.size(oldPath);
-        long newSize = Files.size(newPath);
-        
-        if (oldSize != newSize) {
-            LOGGER.info("File modified (size changed): {}", relativePath);
-            result.addModifiedFile(relativePath, "SIZE_CHANGED", 
-                String.format("Size changed from %d to %d bytes", oldSize, newSize));
-            return;
-        }
-        
-        // Compare content
-        String oldHash = fileCache.getFileHash(oldPath);
-        String newHash = fileCache.getFileHash(newPath);
-        
-        if (!oldHash.equals(newHash)) {
-            LOGGER.info("File modified (content changed): {}", relativePath);
+        try {
+            // Compare file sizes
+            long oldSize = Files.size(oldPath);
+            long newSize = Files.size(newPath);
             
-            // Generate detailed diff for text files
-            if (isTextFile(relativePath)) {
-                String diff = diffGenerator.generateTextDiff(oldPath, newPath);
-                result.addModifiedFile(relativePath, "TEXT_MODIFIED", diff);
-                LOGGER.debug("Text diff generated for: {}", relativePath);
-            } else {
-                // For binary files, just mark as modified
-                result.addModifiedFile(relativePath, "BINARY_MODIFIED", 
-                    "Binary content changed");
-                LOGGER.debug("Binary file marked as modified: {}", relativePath);
+            if (oldSize != newSize) {
+                String sizeChange = String.format("Size changed from %d to %d bytes (difference: %d bytes)", 
+                    oldSize, newSize, (newSize - oldSize));
+                LOGGER.info("File size change detected in {}: {}", relativePath, sizeChange);
+                result.addModifiedFile(relativePath, "SIZE_CHANGED", sizeChange);
+                return;
             }
+            
+            // Compare content
+            String oldHash = fileCache.getFileHash(oldPath);
+            String newHash = fileCache.getFileHash(newPath);
+            
+            if (!oldHash.equals(newHash)) {
+                if (relativePath.endsWith(".class")) {
+                    compareClassFiles(oldPath, newPath, relativePath, result);
+                } else if (relativePath.endsWith(".nbt")) {
+                    compareNbtFiles(oldPath, newPath, relativePath, result);
+                } else if (isTextFile(relativePath)) {
+                    compareTextFiles(oldPath, newPath, relativePath, result);
+                } else {
+                    String details = String.format("Binary content changed (size: %d bytes)", oldSize);
+                    LOGGER.info("Binary file modified: {}", relativePath);
+                    result.addModifiedFile(relativePath, "BINARY_MODIFIED", details);
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.error("Error comparing file: {} - {}", relativePath, e.getMessage());
+            result.addModifiedFile(relativePath, "COMPARISON_ERROR", 
+                "Error during comparison: " + e.getMessage());
+        }
+    }
+
+    private void compareTextFiles(Path oldPath, Path newPath, String relativePath, ComparisonResult result) throws IOException {
+        List<String> oldLines = Files.readAllLines(oldPath);
+        List<String> newLines = Files.readAllLines(newPath);
+        
+        try {
+            Patch<String> patch = DiffUtils.diff(oldLines, newLines);
+            List<AbstractDelta<String>> deltas = patch.getDeltas();
+            
+            int addedLines = 0;
+            int removedLines = 0;
+            int modifiedLines = 0;
+            
+            for (AbstractDelta<String> delta : deltas) {
+                switch (delta.getType()) {
+                    case INSERT:
+                        addedLines += delta.getTarget().size();
+                        break;
+                    case DELETE:
+                        removedLines += delta.getSource().size();
+                        break;
+                    case CHANGE:
+                        modifiedLines += Math.max(delta.getSource().size(), delta.getTarget().size());
+                        break;
+                }
+            }
+            
+            String diff = diffGenerator.generateTextDiff(oldPath, newPath);
+            String details = String.format("Lines changed: +%d -%d ~%d (Total: %d changes)", 
+                addedLines, removedLines, modifiedLines, deltas.size());
+            
+            LOGGER.info("Text file modified: {} - {}", relativePath, details);
+            result.addModifiedFile(relativePath, "TEXT_MODIFIED", details + "\n" + diff);
+        } catch (Exception e) {
+            LOGGER.error("Error generating diff for {}: {}", relativePath, e.getMessage());
+            result.addModifiedFile(relativePath, "DIFF_ERROR", "Error generating diff: " + e.getMessage());
+        }
+    }
+
+    private void compareClassFiles(Path oldPath, Path newPath, String relativePath, ComparisonResult result) {
+        try {
+            byte[] oldContent = Files.readAllBytes(oldPath);
+            byte[] newContent = Files.readAllBytes(newPath);
+            
+            if (!Arrays.equals(oldContent, newContent)) {
+                String details = String.format("Class file modified (size: %d bytes -> %d bytes)", 
+                    oldContent.length, newContent.length);
+                LOGGER.info("Class file changed: {} - {}", relativePath, details);
+                result.addModifiedFile(relativePath, "CLASS_MODIFIED", details);
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Error comparing class files: {} - {}", relativePath, e.getMessage());
+            result.addModifiedFile(relativePath, "CLASS_COMPARISON_ERROR", 
+                "Error comparing class file: " + e.getMessage());
+        }
+    }
+
+    private void compareNbtFiles(Path oldPath, Path newPath, String relativePath, ComparisonResult result) {
+        try {
+            // Read NBT files using binary streams
+            try (InputStream oldIn = new BufferedInputStream(Files.newInputStream(oldPath));
+                 InputStream newIn = new BufferedInputStream(Files.newInputStream(newPath))) {
+                
+                // Compare NBT data as binary
+                byte[] oldBuffer = oldIn.readAllBytes();
+                byte[] newBuffer = newIn.readAllBytes();
+                
+                if (!Arrays.equals(oldBuffer, newBuffer)) {
+                    result.addModifiedFile(relativePath, "NBT_MODIFIED", 
+                        "NBT data changed");
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Error comparing NBT files: {} - {}", relativePath, e.getMessage());
+            result.addModifiedFile(relativePath, "NBT_COMPARISON_ERROR", 
+                "Error comparing NBT file: " + e.getMessage());
         }
     }
 
@@ -194,8 +271,6 @@ public class MinecraftVersionHandler {
                path.endsWith(".mcmeta") || 
                path.endsWith(".xml") || 
                path.endsWith(".cfg") ||
-               path.endsWith(".class") || 
-               path.endsWith(".nbt") ||
                path.endsWith(".JAVA") || 
                path.endsWith(".TXT") || 
                path.endsWith(".JSON") || 
@@ -203,9 +278,7 @@ public class MinecraftVersionHandler {
                path.endsWith(".PROPERTIES") || 
                path.endsWith(".MCMETA") || 
                path.endsWith(".XML") || 
-               path.endsWith(".CFG") ||
-               path.endsWith(".CLASS") || 
-               path.endsWith(".NBT");
+               path.endsWith(".CFG");
     }
 
     @Cacheable(key = "'texture-' + #oldPath + '-' + #newPath")
@@ -302,22 +375,24 @@ public class MinecraftVersionHandler {
             List<String> oldLines = Files.readAllLines(oldPath);
             List<String> newLines = Files.readAllLines(newPath);
             
-            Patch<String> patch = DiffUtils.diff(oldLines, newLines);
-            
-            // Use DiffRowGenerator instead of UnifiedDiffUtils
-            DiffRowGenerator generator = DiffRowGenerator.create()
-                .showInlineDiffs(true)
-                .inlineDiffByWord(true)
-                .oldTag(f -> "[-")
-                .newTag(f -> "{+")
-                .oldTag(f -> "-]")
-                .newTag(f -> "+}")
-                .build();
-            
-            List<DiffRow> rows = generator.generateDiffRows(oldLines, newLines);
-            return rows.stream()
-                .map(DiffRow::toString)
-                .collect(Collectors.joining("\n"));
+            try {
+                DiffRowGenerator generator = DiffRowGenerator.create()
+                    .showInlineDiffs(true)
+                    .inlineDiffByWord(true)
+                    .oldTag(f -> "[-")
+                    .newTag(f -> "{+")
+                    .oldTag(f -> "-]")
+                    .newTag(f -> "+}")
+                    .build();
+                
+                List<DiffRow> rows = generator.generateDiffRows(oldLines, newLines);
+                return rows.stream()
+                    .map(DiffRow::toString)
+                    .collect(Collectors.joining("\n"));
+            } catch (Exception e) {
+                LOGGER.error("Error generating diff: {}", e.getMessage());
+                return "Error generating diff: " + e.getMessage();
+            }
         }
         
         public byte[] generateBinaryDiff(Path oldPath, Path newPath) throws IOException {
@@ -407,10 +482,22 @@ public class MinecraftVersionHandler {
         
         @Override
         public String toString() {
-            return String.format(
-                "ComparisonResult{added=%d, removed=%d, modified=%d}",
-                added.size(), removed.size(), modifications.size()
-            );
+            StringBuilder sb = new StringBuilder();
+            sb.append("Comparison Results:\n");
+            sb.append(String.format("Added files: %d\n", added.size()));
+            sb.append(String.format("Removed files: %d\n", removed.size()));
+            sb.append(String.format("Modified files: %d\n", modifications.size()));
+            
+            if (!modifications.isEmpty()) {
+                sb.append("\nModified Files Details:\n");
+                modifications.forEach((path, mod) -> {
+                    sb.append(String.format("- %s\n", path));
+                    sb.append(String.format("  Type: %s\n", mod.getType()));
+                    sb.append(String.format("  Changes: %s\n", mod.getDetails()));
+                });
+            }
+            
+            return sb.toString();
         }
     }
 
