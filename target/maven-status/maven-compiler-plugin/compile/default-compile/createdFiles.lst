@@ -3,7 +3,6 @@ core\MinecraftVersionHandler.class
 core\MinecraftVersionHandler$ComparisonResult.class
 core\MinecraftVersionHandler$ValidationException.class
 core\VersionComparator.class
-core\MinecraftVersionHandler$DiffEntry.class
 core\MinecraftVersionHandler$DiffGenerator.class
 core\WebConfig$1.class
 core\MinecraftVersionHandler$FileCache$CacheEntry.class
@@ -15,6 +14,7 @@ core\HealthController.class
 core\Main.class
 core\MinecraftVersionHandler$FileComparison.class
 core\MinecraftVersionHandler$ValidationService.class
+core\MinecraftVersionHandler$FileModification.class
 core\MinecraftVersionHandler$ComparisonState.class
 core\UploadController.class
 core\LogController.class

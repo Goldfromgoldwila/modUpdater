@@ -139,72 +139,73 @@ public class MinecraftVersionHandler {
     }
 
     private void compareSingleFile(Path oldPath, Path newPath, String relativePath, ComparisonResult result) throws IOException {
-        // Check file size first
+        LOGGER.debug("Comparing file: {}", relativePath);
+        
+        // Check if files exist
+        if (!Files.exists(oldPath) && Files.exists(newPath)) {
+            LOGGER.info("New file added: {}", relativePath);
+            result.addAddedFile(relativePath);
+            return;
+        }
+        if (Files.exists(oldPath) && !Files.exists(newPath)) {
+            LOGGER.info("File removed: {}", relativePath);
+            result.addRemovedFile(relativePath);
+            return;
+        }
+        
+        // Compare file sizes
         long oldSize = Files.size(oldPath);
         long newSize = Files.size(newPath);
-
-        if (oldSize > LARGE_FILE_THRESHOLD || newSize > LARGE_FILE_THRESHOLD) {
-            compareLargeFiles(oldPath, newPath, relativePath, result);
-        } else {
-            compareRegularFiles(oldPath, newPath, relativePath, result);
+        
+        if (oldSize != newSize) {
+            LOGGER.info("File modified (size changed): {}", relativePath);
+            result.addModifiedFile(relativePath, "SIZE_CHANGED", 
+                String.format("Size changed from %d to %d bytes", oldSize, newSize));
+            return;
         }
-    }
-
-    private void compareLargeFiles(Path oldPath, Path newPath, String relativePath, ComparisonResult result) throws IOException {
-        try (InputStream oldIs = new BufferedInputStream(Files.newInputStream(oldPath));
-             InputStream newIs = new BufferedInputStream(Files.newInputStream(newPath))) {
-            
-            byte[] oldBuffer = new byte[CHUNK_SIZE];
-            byte[] newBuffer = new byte[CHUNK_SIZE];
-            boolean different = false;
-            long position = 0;
-
-            while (true) {
-                int oldRead = oldIs.read(oldBuffer);
-                int newRead = newIs.read(newBuffer);
-
-                if (oldRead == -1 && newRead == -1) break;
-                if (oldRead != newRead) {
-                    different = true;
-                    break;
-                }
-                if (oldRead == -1 || newRead == -1) break;
-
-                if (!Arrays.equals(oldBuffer, 0, oldRead, newBuffer, 0, newRead)) {
-                    different = true;
-                    break;
-                }
-                position += oldRead;
-            }
-
-            if (different) {
-                result.addModifiedFile(relativePath, "CONTENT_MODIFIED", 
-                    String.format("Files differ at position: %d", position));
-            }
-        }
-    }
-
-    private void compareRegularFiles(Path oldPath, Path newPath, String relativePath, ComparisonResult result) throws IOException {
-        // Get cached hashes if available
+        
+        // Compare content
         String oldHash = fileCache.getFileHash(oldPath);
         String newHash = fileCache.getFileHash(newPath);
-
+        
         if (!oldHash.equals(newHash)) {
+            LOGGER.info("File modified (content changed): {}", relativePath);
+            
             // Generate detailed diff for text files
             if (isTextFile(relativePath)) {
                 String diff = diffGenerator.generateTextDiff(oldPath, newPath);
                 result.addModifiedFile(relativePath, "TEXT_MODIFIED", diff);
+                LOGGER.debug("Text diff generated for: {}", relativePath);
             } else {
-                // Generate binary diff for binary files
-                byte[] binaryDiff = diffGenerator.generateBinaryDiff(oldPath, newPath);
-                result.addBinaryDiff(relativePath, binaryDiff);
+                // For binary files, just mark as modified
+                result.addModifiedFile(relativePath, "BINARY_MODIFIED", 
+                    "Binary content changed");
+                LOGGER.debug("Binary file marked as modified: {}", relativePath);
             }
         }
     }
 
     private boolean isTextFile(String path) {
-        String extension = path.substring(path.lastIndexOf('.') + 1).toLowerCase();
-        return Arrays.asList("txt", "json", "yml", "properties", "mcmeta").contains(extension);
+        return path.endsWith(".java") || 
+               path.endsWith(".txt") || 
+               path.endsWith(".json") || 
+               path.endsWith(".yml") || 
+               path.endsWith(".properties") || 
+               path.endsWith(".mcmeta") || 
+               path.endsWith(".xml") || 
+               path.endsWith(".cfg") ||
+               path.endsWith(".class") || 
+               path.endsWith(".nbt") ||
+               path.endsWith(".JAVA") || 
+               path.endsWith(".TXT") || 
+               path.endsWith(".JSON") || 
+               path.endsWith(".YML") || 
+               path.endsWith(".PROPERTIES") || 
+               path.endsWith(".MCMETA") || 
+               path.endsWith(".XML") || 
+               path.endsWith(".CFG") ||
+               path.endsWith(".CLASS") || 
+               path.endsWith(".NBT");
     }
 
     @Cacheable(key = "'texture-' + #oldPath + '-' + #newPath")
@@ -373,35 +374,57 @@ public class MinecraftVersionHandler {
     }
 
     public static class ComparisonResult {
-        private final Map<String, DiffEntry> diffs = new HashMap<>();
+        private final Map<String, FileModification> modifications = new HashMap<>();
         private final Set<String> added = new HashSet<>();
         private final Set<String> removed = new HashSet<>();
         
         public void addModifiedFile(String path, String type, String details) {
-            diffs.put(path, new DiffEntry(type, details));
-        }
-        
-        public void addBinaryDiff(String path, byte[] diff) {
-            diffs.put(path, new DiffEntry("BINARY_MODIFIED", Base64.getEncoder().encodeToString(diff)));
+            LOGGER.info("Adding modified file: {} ({})", path, type);
+            modifications.put(path, new FileModification(type, details));
         }
         
         public void addAddedFile(String path) {
+            LOGGER.info("Adding new file: {}", path);
             added.add(path);
         }
         
         public void addRemovedFile(String path) {
+            LOGGER.info("Adding removed file: {}", path);
             removed.add(path);
+        }
+        
+        public Map<String, FileModification> getModifications() {
+            return new HashMap<>(modifications);
+        }
+        
+        public Set<String> getAddedFiles() {
+            return new HashSet<>(added);
+        }
+        
+        public Set<String> getRemovedFiles() {
+            return new HashSet<>(removed);
+        }
+        
+        @Override
+        public String toString() {
+            return String.format(
+                "ComparisonResult{added=%d, removed=%d, modified=%d}",
+                added.size(), removed.size(), modifications.size()
+            );
         }
     }
 
-    private static class DiffEntry {
-        final String type;
-        final String details;
+    public static class FileModification {
+        private final String type;
+        private final String details;
         
-        DiffEntry(String type, String details) {
+        public FileModification(String type, String details) {
             this.type = type;
             this.details = details;
         }
+        
+        public String getType() { return type; }
+        public String getDetails() { return details; }
     }
 
     public static class ValidationException extends RuntimeException {
