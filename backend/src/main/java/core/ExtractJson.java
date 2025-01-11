@@ -7,7 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RequestMapping;
-
+import core.MinecraftVersionHandler.ComparisonResult;
 import java.io.*;
 import java.nio.file.*;
 import java.util.*;
@@ -217,8 +217,14 @@ public class ExtractJson {
 
     private void triggerVersionComparison() {
         LOGGER.info("Triggering comparison between cleanVersion: {} and mcVersion: {}", cleanVersion, mcVersion);
-        versionHandler.compareMinecraftVersions(cleanVersion, mcVersion);
+        try {
+            ComparisonResult result = versionHandler.compareMinecraftVersions(cleanVersion, mcVersion);
+            LOGGER.info("Comparison result: {}", result);
+        } catch (IOException e) {
+            LOGGER.error("Error during version comparison: {}", e.getMessage(), e);
+        } catch (Exception e) {
+            LOGGER.error("Unexpected error during version comparison: {}", e.getMessage(), e);
+        }
     }
-
 
 }
