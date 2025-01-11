@@ -41,6 +41,9 @@ import java.io.BufferedInputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.stream.Stream;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 @Component
 @Validated
@@ -164,43 +167,176 @@ public class MinecraftVersionHandler {
     }
 
     private void performFullComparison(File oldVersionDir, File newVersionDir, ComparisonResult result) {
-        LOGGER.info("Starting full comparison");
+        LOGGER.info("Starting full comparison between versions");
+        
+        // Detailed logging setup
+        long startTime = System.currentTimeMillis();
+        AtomicInteger processedFiles = new AtomicInteger(0);
+        AtomicInteger addedFilesCount = new AtomicInteger(0);
+        AtomicInteger removedFilesCount = new AtomicInteger(0);
+        AtomicInteger modifiedFilesCount = new AtomicInteger(0);
+        
+        // Logging collector for detailed file changes
+        ConcurrentMap<String, List<String>> fileChangeDetails = new ConcurrentHashMap<>();
+
         try {
-            walkDirectory(oldVersionDir.toPath(), path -> {
+            // Get all files from both directories and sort them alphabetically
+            List<Path> oldFiles = Files.walk(oldVersionDir.toPath())
+                .filter(Files::isRegularFile)
+                .sorted()
+                .collect(Collectors.toList());
+
+            List<Path> newFiles = Files.walk(newVersionDir.toPath())
+                .filter(Files::isRegularFile)
+                .sorted()
+                .collect(Collectors.toList());
+
+            // Process old files
+            oldFiles.parallelStream().forEach(path -> {
                 Path relativePath = oldVersionDir.toPath().relativize(path);
+                processedFiles.incrementAndGet();
+                
                 try {
-                    compareFile(oldVersionDir.toPath(), newVersionDir.toPath(), relativePath, result);
+                    Path correspondingNewPath = newVersionDir.toPath().resolve(relativePath);
+                    
+                    if (!Files.exists(correspondingNewPath)) {
+                        // File removed
+                        result.addRemovedFile(relativePath.toString());
+                        removedFilesCount.incrementAndGet();
+                        
+                        // Log removed file details
+                        fileChangeDetails.computeIfAbsent("REMOVED", k -> new CopyOnWriteArrayList<>())
+                            .add(relativePath.toString());
+                    } else {
+                        // Compare files
+                        compareFile(oldVersionDir.toPath(), newVersionDir.toPath(), relativePath, result);
+                        modifiedFilesCount.incrementAndGet();
+                    }
                 } catch (IOException e) {
-                    LOGGER.error("Error comparing file {}", relativePath, e);
+                    LOGGER.error("Error processing old file {}", relativePath, e);
                 }
             });
-        } catch (Exception e) {
+
+            // Check for added files with detailed logging
+            newFiles.parallelStream().forEach(path -> {
+                Path relativePath = newVersionDir.toPath().relativize(path);
+                Path correspondingOldPath = oldVersionDir.toPath().resolve(relativePath);
+                
+                try {
+                    if (!Files.exists(correspondingOldPath)) {
+                        // File added
+                        result.addAddedFile(relativePath.toString());
+                        addedFilesCount.incrementAndGet();
+                        
+                        // Detailed logging for added files
+                        try {
+                            long fileSize = Files.size(path);
+                            String fileType = determineFileType(relativePath.toString());
+                            
+                            fileChangeDetails.computeIfAbsent("ADDED", k -> new CopyOnWriteArrayList<>())
+                                .add(String.format("%s (Size: %d bytes, Type: %s)", 
+                                    relativePath, fileSize, fileType));
+                        } catch (IOException e) {
+                            LOGGER.warn("Could not get details for added file {}", relativePath);
+                        }
+                    }
+                } catch (Exception e) {
+                    LOGGER.error("Error checking added file {}", relativePath, e);
+                }
+            });
+
+            // Generate comprehensive comparison report
+            generateComparisonReport(
+                startTime, 
+                processedFiles.get(), 
+                addedFilesCount.get(), 
+                removedFilesCount.get(), 
+                modifiedFilesCount.get(),
+                fileChangeDetails
+            );
+
+        } catch (IOException e) {
             LOGGER.error("Error during full comparison", e);
             throw new ComparisonException("Failed to perform full comparison", e);
         }
+    }
+
+    private String determineFileType(String filename) {
+        String lowercaseFilename = filename.toLowerCase();
         
-        LOGGER.info("Full comparison completed. Added files: {}, Removed files: {}, Modified files: {}", 
-            result.getAddedFiles().size(), 
-            result.getRemovedFiles().size(), 
-            result.getModifications().size());
+        if (lowercaseFilename.endsWith(".class")) return "Java Class";
+        if (lowercaseFilename.endsWith(".java")) return "Java Source";
+        if (lowercaseFilename.endsWith(".json")) return "JSON";
+        if (lowercaseFilename.endsWith(".txt")) return "Text";
+        if (lowercaseFilename.endsWith(".xml")) return "XML";
+        if (lowercaseFilename.endsWith(".properties")) return "Properties";
+        if (lowercaseFilename.endsWith(".yml") || lowercaseFilename.endsWith(".yaml")) return "YAML";
+        if (lowercaseFilename.endsWith(".nbt")) return "NBT Data";
+        
+        return "Unknown";
+    }
+
+    private void generateComparisonReport(
+            long startTime, 
+            int processedFiles, 
+            int addedFiles, 
+            int removedFiles, 
+            int modifiedFiles,
+            ConcurrentMap<String, List<String>> fileChangeDetails) {
+        
+        long endTime = System.currentTimeMillis();
+        long duration = endTime - startTime;
+        
+        // Detailed Logging Report
+        LOGGER.info("===== Comparison Report =====");
+        LOGGER.info("Total Processing Time: {} ms", duration);
+        LOGGER.info("Total Files Processed: {}", processedFiles);
+        LOGGER.info("Added Files: {}", addedFiles);
+        LOGGER.info("Removed Files: {}", removedFiles);
+        LOGGER.info("Modified Files: {}", modifiedFiles);
+        
+        // Detailed File Change Logging
+        if (!fileChangeDetails.isEmpty()) {
+            LOGGER.info("===== Detailed File Changes =====");
+            
+            // Log Added Files Details
+            if (fileChangeDetails.containsKey("ADDED")) {
+                LOGGER.info("Added Files Details:");
+                fileChangeDetails.get("ADDED").forEach(file -> 
+                    LOGGER.info("  + {}", file)
+                );
+            }
+            
+            // Log Removed Files Details
+            if (fileChangeDetails.containsKey("REMOVED")) {
+                LOGGER.info("Removed Files Details:");
+                fileChangeDetails.get("REMOVED").forEach(file -> 
+                    LOGGER.info("  - {}", file)
+                );
+            }
+        }
+        
+        // Performance Metrics
+        double filesPerSecond = processedFiles / (duration / 1000.0);
+        LOGGER.info("Processing Speed: {:.2f} files/second", filesPerSecond);
+        
+        // Percentage Calculations
+        double addedPercentage = (double) addedFiles / processedFiles * 100;
+        double removedPercentage = (double) removedFiles / processedFiles * 100;
+        double modifiedPercentage = (double) modifiedFiles / processedFiles * 100;
+        
+        LOGGER.info("===== Percentage Breakdown =====");
+        LOGGER.info("Added Files: {:.2f}%", addedPercentage);
+        LOGGER.info("Removed Files: {:.2f}%", removedPercentage);
+        LOGGER.info("Modified Files: {:.2f}%", modifiedPercentage);
     }
 
     private void compareFile(Path oldBasePath, Path newBasePath, Path relativePath, ComparisonResult result) throws IOException {
         Path oldPath = oldBasePath.resolve(relativePath);
         Path newPath = newBasePath.resolve(relativePath);
 
-        if (!Files.exists(oldPath) && Files.exists(newPath)) {
-            result.addAddedFile(relativePath.toString());
-        } else if (Files.exists(oldPath) && !Files.exists(newPath)) {
-            result.addRemovedFile(relativePath.toString());
-        } else if (Files.exists(oldPath) && Files.exists(newPath)) {
-            compareSingleFile(oldPath, newPath, relativePath.toString(), result);
-        }
-    }
-
-    private void compareSingleFile(Path oldPath, Path newPath, String relativePath, ComparisonResult result) throws IOException {
         try {
-            // Compare file sizes
+            // Compare file sizes first (quick check)
             long oldSize = Files.size(oldPath);
             long newSize = Files.size(newPath);
             
@@ -208,7 +344,7 @@ public class MinecraftVersionHandler {
                 String sizeChange = String.format("Size changed from %d to %d bytes (difference: %d bytes)", 
                     oldSize, newSize, (newSize - oldSize));
                 LOGGER.info("File size change detected in {}: {}", relativePath, sizeChange);
-                result.addModifiedFile(relativePath, "SIZE_CHANGED", sizeChange);
+                result.addModifiedFile(relativePath.toString(), "SIZE_CHANGED", sizeChange);
                 return;
             }
             
@@ -217,107 +353,66 @@ public class MinecraftVersionHandler {
             String newHash = fileCache.getFileHash(newPath);
             
             if (!oldHash.equals(newHash)) {
-                if (relativePath.endsWith(".class")) {
-                    compareClassFiles(oldPath, newPath, relativePath, result);
-                } else if (relativePath.endsWith(".nbt")) {
-                    compareNbtFiles(oldPath, newPath, relativePath, result);
-                } else if (isTextFile(relativePath)) {
-                    compareTextFiles(oldPath, newPath, relativePath, result);
+                // Optimize file comparison based on file type
+                if (relativePath.toString().endsWith(".class")) {
+                    compareClassFiles(oldPath, newPath, relativePath.toString(), result);
+                } else if (relativePath.toString().endsWith(".nbt")) {
+                    compareNbtFiles(oldPath, newPath, relativePath.toString(), result);
+                } else if (isTextFile(relativePath.toString())) {
+                    compareTextFiles(oldPath, newPath, relativePath.toString(), result);
                 } else {
                     String details = String.format("Binary content changed (size: %d bytes)", oldSize);
                     LOGGER.info("Binary file modified: {}", relativePath);
-                    result.addModifiedFile(relativePath, "BINARY_MODIFIED", details);
+                    result.addModifiedFile(relativePath.toString(), "BINARY_MODIFIED", details);
                 }
             }
         } catch (Exception e) {
             LOGGER.error("Error comparing file: {} - {}", relativePath, e.getMessage());
-            result.addModifiedFile(relativePath, "COMPARISON_ERROR", 
+            result.addModifiedFile(relativePath.toString(), "COMPARISON_ERROR", 
                 "Error during comparison: " + e.getMessage());
         }
     }
 
     private void compareTextFiles(Path oldPath, Path newPath, String relativePath, ComparisonResult result) throws IOException {
-        LOGGER.info("Comparing text files: {} and {}", oldPath, newPath);
-        List<String> oldLines = Files.readAllLines(oldPath);
-        List<String> newLines = Files.readAllLines(newPath);
-        
         try {
-            Patch<String> patch = DiffUtils.diff(oldLines, newLines);
-            List<AbstractDelta<String>> deltas = patch.getDeltas();
-            
-            // Detailed statistics and logging for text line changes
-            int addedLines = 0;
-            int removedLines = 0;
-            int modifiedLines = 0;
-            int totalChangedChunks = deltas.size();
-            
-            StringBuilder detailedLog = new StringBuilder();
-            detailedLog.append(String.format("File: %s\n", relativePath));
-            detailedLog.append("Changes by type:\n");
-            
-            Map<Integer, String> lineChanges = new TreeMap<>();
-            
-            for (AbstractDelta<String> delta : deltas) {
-                int sourceStart = delta.getSource().getPosition() + 1; // 1-based line numbers
-                int targetStart = delta.getTarget().getPosition() + 1;
-                
-                switch (delta.getType()) {
-                    case INSERT:
-                        int insertedCount = delta.getTarget().size();
-                        addedLines += insertedCount;
-                        String insertDetail = String.format("Lines %d-%d: Added %d line(s)", 
-                            targetStart, targetStart + insertedCount - 1, insertedCount);
-                        lineChanges.put(targetStart, "INSERT: " + insertDetail);
-                        detailedLog.append("+ ").append(insertDetail).append("\n");
-                        break;
-                        
-                    case DELETE:
-                        int deletedCount = delta.getSource().size();
-                        removedLines += deletedCount;
-                        String deleteDetail = String.format("Lines %d-%d: Removed %d line(s)", 
-                            sourceStart, sourceStart + deletedCount - 1, deletedCount);
-                        lineChanges.put(sourceStart, "DELETE: " + deleteDetail);
-                        detailedLog.append("- ").append(deleteDetail).append("\n");
-                        break;
-                        
-                    case CHANGE:
-                        int changedSourceCount = delta.getSource().size();
-                        int changedTargetCount = delta.getTarget().size();
-                        modifiedLines += Math.max(changedSourceCount, changedTargetCount);
-                        String changeDetail = String.format("Lines %d-%d modified (%d lines changed to %d lines)", 
-                            sourceStart, sourceStart + changedSourceCount - 1, 
-                            changedSourceCount, changedTargetCount);
-                        lineChanges.put(sourceStart, "MODIFY: " + changeDetail);
-                        detailedLog.append("~ ").append(changeDetail).append("\n");
-                        break;
-                }
-            }
-            
-            int totalLines = Math.max(oldLines.size(), newLines.size());
-            double churnRate = (double)(addedLines + removedLines + modifiedLines) / totalLines * 100;
-            
-            String summary = String.format(
-                "Code Change Summary:\n" +
-                "- Total lines in file: %d\n" +
-                "- Added lines: %d\n" +
-                "- Removed lines: %d\n" +
-                "- Modified lines: %d\n" +
-                "- Total changed chunks: %d\n" +
-                "- Code churn rate: %.2f%%\n" +
-                "\nDetailed Changes:\n%s\n",
-                totalLines, addedLines, removedLines, modifiedLines, 
-                totalChangedChunks, churnRate,
-                detailedLog.toString()
+            // Use a more efficient diff algorithm
+            Patch<String> patch = DiffUtils.diff(
+                Files.readAllLines(oldPath), 
+                Files.readAllLines(newPath)
             );
             
-            LOGGER.info("Text file modified: {} - Changes: +{} -{} ~{} ({}% churn)", 
-                relativePath, addedLines, removedLines, modifiedLines, String.format("%.1f", churnRate));
-                
-            result.addModifiedFile(relativePath, "TEXT_MODIFIED", summary);
+            List<AbstractDelta<String>> deltas = patch.getDeltas();
             
+            if (!deltas.isEmpty()) {
+                int addedLines = 0;
+                int removedLines = 0;
+                int modifiedLines = 0;
+                
+                for (AbstractDelta<String> delta : deltas) {
+                    switch (delta.getType()) {
+                        case INSERT:
+                            addedLines += delta.getTarget().size();
+                            break;
+                        case DELETE:
+                            removedLines += delta.getSource().size();
+                            break;
+                        case CHANGE:
+                            modifiedLines += Math.max(delta.getSource().size(), delta.getTarget().size());
+                            break;
+                    }
+                }
+                
+                String summary = String.format(
+                    "Text file changes: +%d lines, -%d lines, ~%d lines modified", 
+                    addedLines, removedLines, modifiedLines
+                );
+                
+                result.addModifiedFile(relativePath, "TEXT_MODIFIED", summary);
+            }
         } catch (Exception e) {
             LOGGER.error("Error generating diff for {}: {}", relativePath, e.getMessage());
-            result.addModifiedFile(relativePath, "DIFF_ERROR", "Error generating diff: " + e.getMessage());
+            result.addModifiedFile(relativePath, "DIFF_ERROR", 
+                "Error generating diff: " + e.getMessage());
         }
     }
 
