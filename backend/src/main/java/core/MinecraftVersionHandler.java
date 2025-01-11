@@ -128,22 +128,61 @@ public class MinecraftVersionHandler {
 
     private void performComparison(File oldVersionDir, File newVersionDir, 
             String cleanVersion, String mcVersion, ComparisonResult result) {
+        LOGGER.info("Starting performComparison method for versions {} and {}", cleanVersion, mcVersion);
+        
         Optional<ComparisonState> previousState = loadPreviousComparisonState(cleanVersion, mcVersion);
         
         if (previousState.isPresent()) {
+            LOGGER.info("Performing incremental comparison for versions {} and {}", cleanVersion, mcVersion);
             performIncrementalComparison(oldVersionDir, newVersionDir, previousState.get(), result);
         } else {
+            LOGGER.info("Performing full comparison for versions {} and {}", cleanVersion, mcVersion);
             performFullComparison(oldVersionDir, newVersionDir, result);
         }
+        
+        LOGGER.info("Comparison completed. Added files: {}, Removed files: {}, Modified files: {}", 
+            result.getAddedFiles().size(), 
+            result.getRemovedFiles().size(), 
+            result.getModifications().size());
     }
 
     private void performIncrementalComparison(File oldVersionDir, File newVersionDir, 
             ComparisonState previousState, ComparisonResult result) {
-        // Implement the incremental comparison logic here
+        LOGGER.info("Starting incremental comparison");
+        try {
+            Set<Path> changedFiles = findChangedFilesSinceLastComparison(oldVersionDir, newVersionDir, previousState);
+            
+            LOGGER.info("Found {} changed files", changedFiles.size());
+            
+            for (Path relativePath : changedFiles) {
+                compareFile(oldVersionDir.toPath(), newVersionDir.toPath(), relativePath, result);
+            }
+        } catch (Exception e) {
+            LOGGER.error("Error during incremental comparison", e);
+            throw new ComparisonException("Failed to perform incremental comparison", e);
+        }
     }
 
     private void performFullComparison(File oldVersionDir, File newVersionDir, ComparisonResult result) {
-        // Implement the full comparison logic here
+        LOGGER.info("Starting full comparison");
+        try {
+            walkDirectory(oldVersionDir.toPath(), path -> {
+                Path relativePath = oldVersionDir.toPath().relativize(path);
+                try {
+                    compareFile(oldVersionDir.toPath(), newVersionDir.toPath(), relativePath, result);
+                } catch (IOException e) {
+                    LOGGER.error("Error comparing file {}", relativePath, e);
+                }
+            });
+        } catch (Exception e) {
+            LOGGER.error("Error during full comparison", e);
+            throw new ComparisonException("Failed to perform full comparison", e);
+        }
+        
+        LOGGER.info("Full comparison completed. Added files: {}, Removed files: {}, Modified files: {}", 
+            result.getAddedFiles().size(), 
+            result.getRemovedFiles().size(), 
+            result.getModifications().size());
     }
 
     private void compareFile(Path oldBasePath, Path newBasePath, Path relativePath, ComparisonResult result) throws IOException {
