@@ -44,6 +44,14 @@ import java.util.stream.Stream;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.CompletableFuture;
+import net.jpountz.xxhash.XXHashFactory;
+import net.jpountz.xxhash.XXHash64;
+import java.util.Map.Entry;
+import java.util.AbstractMap.SimpleEntry;
+import java.util.stream.Collectors;
+import java.util.TreeMap;
 
 @Component
 @Validated
@@ -196,7 +204,7 @@ public class MinecraftVersionHandler {
             LOGGER.info("Found {} changed files", changedFiles.size());
             
             for (Path relativePath : changedFiles) {
-                compareFile(oldVersionDir.toPath(), newVersionDir.toPath(), relativePath, result);
+                compareFile(oldVersionDir.toPath(), newVersionDir.toPath(), relativePath.toString(), result);
             }
         } catch (Exception e) {
             LOGGER.error("Error during incremental comparison", e);
@@ -204,111 +212,152 @@ public class MinecraftVersionHandler {
         }
     }
 
-    private void performFullComparison(File oldVersionDir, File newVersionDir, ComparisonResult result) throws IOException {
+    private void performFullComparison(File oldVersionDir, File newVersionDir, ComparisonResult result) {
         LOGGER.info("Starting full comparison between versions");
-        
-        // Detailed logging setup
         long startTime = System.currentTimeMillis();
-        AtomicInteger processedFiles = new AtomicInteger(0);
-        AtomicInteger addedFilesCount = new AtomicInteger(0);
-        AtomicInteger removedFilesCount = new AtomicInteger(0);
-        AtomicInteger modifiedFilesCount = new AtomicInteger(0);
-        AtomicInteger unchangedFilesCount = new AtomicInteger(0);
         
-        // Logging collector for detailed file changes
-        ConcurrentMap<String, List<String>> fileChangeDetails = new ConcurrentHashMap<>();
-
-        // Get all files from both directories and sort them alphabetically
-        List<Path> oldFiles = Files.walk(oldVersionDir.toPath())
-            .filter(Files::isRegularFile)
-            .sorted()
-            .collect(Collectors.toList());
-
-        List<Path> newFiles = Files.walk(newVersionDir.toPath())
-            .filter(Files::isRegularFile)
-            .sorted()
-            .collect(Collectors.toList());
-
-        // Process old files
-        oldFiles.parallelStream().forEach(path -> {
-            Path relativePath = oldVersionDir.toPath().relativize(path);
-            processedFiles.incrementAndGet();
+        // Use ForkJoinPool for better parallel processing
+        ForkJoinPool customThreadPool = new ForkJoinPool(Runtime.getRuntime().availableProcessors() * 2);
+        
+        try {
+            // Create file lists with pre-calculated hashes
+            Map<String, String> oldFileHashes = new ConcurrentHashMap<>();
+            Map<String, String> newFileHashes = new ConcurrentHashMap<>();
             
-            try {
-                Path correspondingNewPath = newVersionDir.toPath().resolve(relativePath);
-                
-                if (!Files.exists(correspondingNewPath)) {
-                    // File removed
+            // Collect files and calculate hashes in parallel
+            CompletableFuture<Void> oldFilesFuture = CompletableFuture.runAsync(() -> {
+                try {
+                    Files.walk(oldVersionDir.toPath())
+                        .parallel()
+                        .filter(Files::isRegularFile)
+                        .forEach(path -> {
+                            try {
+                                oldFileHashes.put(path.toString(), calculateQuickHash(path));
+                            } catch (IOException e) {
+                                LOGGER.error("Error hashing file: {}", path, e);
+                            }
+                        });
+                } catch (IOException e) {
+                    LOGGER.error("Error walking old directory", e);
+                }
+            }, customThreadPool);
+
+            CompletableFuture<Void> newFilesFuture = CompletableFuture.runAsync(() -> {
+                try {
+                    Files.walk(newVersionDir.toPath())
+                        .parallel()
+                        .filter(Files::isRegularFile)
+                        .forEach(path -> {
+                            try {
+                                newFileHashes.put(path.toString(), calculateQuickHash(path));
+                            } catch (IOException e) {
+                                LOGGER.error("Error hashing file: {}", path, e);
+                            }
+                        });
+                } catch (IOException e) {
+                    LOGGER.error("Error walking new directory", e);
+                }
+            }, customThreadPool);
+
+            // Wait for both operations to complete
+            CompletableFuture.allOf(oldFilesFuture, newFilesFuture).join();
+
+            // Compare files in parallel using the pre-calculated hashes
+            oldFileHashes.entrySet().parallelStream().forEach(entry -> {
+                String oldPathStr = entry.getKey();
+                Path oldPath = Paths.get(oldPathStr);
+                String oldHash = entry.getValue();
+                Path relativePath = oldVersionDir.toPath().relativize(oldPath);
+                Path newPath = newVersionDir.toPath().resolve(relativePath);
+
+                if (!Files.exists(newPath)) {
                     result.addRemovedFile(relativePath.toString());
-                    removedFilesCount.incrementAndGet();
-                    
-                    fileChangeDetails.computeIfAbsent("REMOVED", k -> new CopyOnWriteArrayList<>())
-                        .add(relativePath.toString());
                 } else {
-                    // Compare files
-                    try {
-                        boolean wasModified = compareFile(oldVersionDir.toPath(), newVersionDir.toPath(), relativePath, result);
-                        if (wasModified) {
-                            modifiedFilesCount.incrementAndGet();
-                            // Log modified file details
-                            long oldSize = Files.size(oldVersionDir.toPath().resolve(relativePath));
-                            long newSize = Files.size(newVersionDir.toPath().resolve(relativePath));
-                            String changeType = determineChangeType(oldSize, newSize);
-                            
-                            fileChangeDetails.computeIfAbsent("MODIFIED", k -> new CopyOnWriteArrayList<>())
-                                .add(String.format("%s (%s, Old size: %d bytes, New size: %d bytes)", 
-                                    relativePath, changeType, oldSize, newSize));
-                        } else {
-                            // File unchanged
-                            unchangedFilesCount.incrementAndGet();
-                            fileChangeDetails.computeIfAbsent("UNCHANGED", k -> new CopyOnWriteArrayList<>())
-                                .add(relativePath.toString());
-                        }
-                    } catch (IOException e) {
-                        LOGGER.error("Error comparing files for path {}", relativePath, e);
+                    String newHash = newFileHashes.get(newPath.toString());
+                    if (!oldHash.equals(newHash)) {
+                        compareFileDetails(oldPath, newPath, relativePath.toString(), result);
                     }
                 }
-            } catch (Exception e) {
-                LOGGER.error("Error processing old file {}", relativePath, e);
-            }
-        });
+            });
 
-        // Check for added files
-        newFiles.parallelStream().forEach(path -> {
-            Path relativePath = newVersionDir.toPath().relativize(path);
-            Path correspondingOldPath = oldVersionDir.toPath().resolve(relativePath);
+            // Find added files in parallel
+            newFileHashes.keySet().parallelStream()
+                .map(Paths::get)
+                .map(newPath -> newVersionDir.toPath().relativize(newPath))
+                .filter(relativePath -> !Files.exists(oldVersionDir.toPath().resolve(relativePath)))
+                .forEach(relativePath -> result.addAddedFile(relativePath.toString()));
+
+        } finally {
+            customThreadPool.shutdown();
+        }
+
+        long duration = System.currentTimeMillis() - startTime;
+        LOGGER.info("Comparison completed in {} ms", duration);
+    }
+
+    // Quick hash calculation using xxHash for better performance
+    private String calculateQuickHash(Path path) throws IOException {
+        XXHashFactory factory = XXHashFactory.fastestInstance();
+        XXHash64 hash = factory.hash64();
+        
+        try (InputStream is = new BufferedInputStream(Files.newInputStream(path))) {
+            byte[] buffer = new byte[8192];
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            int read;
+            while ((read = is.read(buffer)) != -1) {
+                baos.write(buffer, 0, read);
+            }
+            byte[] data = baos.toByteArray();
+            return Long.toHexString(hash.hash(data, 0, data.length, 0));
+        }
+    }
+
+    // Detailed comparison only for modified files
+    private void compareFileDetails(Path oldPath, Path newPath, String relativePath, ComparisonResult result) {
+        try {
+            long oldSize = Files.size(oldPath);
+            long newSize = Files.size(newPath);
             
-            try {
-                if (!Files.exists(correspondingOldPath)) {
-                    result.addAddedFile(relativePath.toString());
-                    addedFilesCount.incrementAndGet();
-                    
-                    try {
-                        long fileSize = Files.size(path);
-                        String fileType = determineFileType(relativePath.toString());
-                        
-                        fileChangeDetails.computeIfAbsent("ADDED", k -> new CopyOnWriteArrayList<>())
-                            .add(String.format("%s (Size: %d bytes, Type: %s)", 
-                                relativePath, fileSize, fileType));
-                    } catch (IOException e) {
-                        LOGGER.warn("Could not get details for added file {}", relativePath);
-                    }
-                }
-            } catch (Exception e) {
-                LOGGER.error("Error checking added file {}", relativePath, e);
+            if (oldSize != newSize) {
+                String details = String.format("Size changed from %d to %d bytes (difference: %d bytes)", 
+                    oldSize, newSize, (newSize - oldSize));
+                result.addModifiedFile(relativePath, "SIZE_CHANGED", details);
+                return;
             }
-        });
 
-        // Generate comprehensive comparison report with unchanged files
-        generateComparisonReport(
-            startTime, 
-            processedFiles.get(), 
-            addedFilesCount.get(), 
-            removedFilesCount.get(), 
-            modifiedFilesCount.get(),
-            unchangedFilesCount.get(),
-            fileChangeDetails
-        );
+            // For text files, use efficient line comparison
+            if (isTextFile(relativePath)) {
+                compareTextFiles(oldPath, newPath, relativePath, result);
+            } else {
+                // For binary files, use chunk comparison
+                compareBinaryFiles(oldPath, newPath, relativePath, result);
+            }
+        } catch (IOException e) {
+            LOGGER.error("Error comparing files: {} and {}", oldPath, newPath, e);
+        }
+    }
+
+    private void compareBinaryFiles(Path oldPath, Path newPath, String relativePath, ComparisonResult result) throws IOException {
+        try (InputStream oldIs = new BufferedInputStream(Files.newInputStream(oldPath));
+             InputStream newIs = new BufferedInputStream(Files.newInputStream(newPath))) {
+            
+            byte[] oldBuffer = new byte[8192];
+            byte[] newBuffer = new byte[8192];
+            
+            int oldRead, newRead;
+            long position = 0;
+            
+            while ((oldRead = oldIs.read(oldBuffer)) != -1) {
+                newRead = newIs.read(newBuffer);
+                
+                if (oldRead != newRead || !Arrays.equals(oldBuffer, 0, oldRead, newBuffer, 0, newRead)) {
+                    result.addModifiedFile(relativePath, "CONTENT_MODIFIED", 
+                        "Binary content differs at position " + position);
+                    return;
+                }
+                position += oldRead;
+            }
+        }
     }
 
     private String determineFileType(String filename) {
@@ -380,51 +429,34 @@ public class MinecraftVersionHandler {
         }
     }
 
-    private boolean compareFile(Path oldBasePath, Path newBasePath, Path relativePath, ComparisonResult result) throws IOException {
-        Path oldPath = oldBasePath.resolve(relativePath);
-        Path newPath = newBasePath.resolve(relativePath);
-        boolean wasModified = false;
-
+    private boolean compareFile(Path oldPath, Path newPath, String relativePath, ComparisonResult result) {
         try {
-            // Compare file sizes first (quick check)
+            // Quick size comparison first
             long oldSize = Files.size(oldPath);
             long newSize = Files.size(newPath);
             
             if (oldSize != newSize) {
-                String sizeChange = String.format("Size changed from %d to %d bytes (difference: %d bytes)", 
+                String details = String.format("Size changed from %d to %d bytes (difference: %d bytes)", 
                     oldSize, newSize, (newSize - oldSize));
-                LOGGER.debug("File size change detected in {}: {}", relativePath, sizeChange);
-                result.addModifiedFile(relativePath.toString(), "SIZE_CHANGED", sizeChange);
+                result.addModifiedFile(relativePath, "SIZE_CHANGED", details);
                 return true;
             }
             
-            // Compare content
-            String oldHash = fileCache.getFileHash(oldPath);
-            String newHash = fileCache.getFileHash(newPath);
+            // Only do content comparison if sizes match
+            byte[] oldContent = Files.readAllBytes(oldPath);
+            byte[] newContent = Files.readAllBytes(newPath);
             
-            if (!oldHash.equals(newHash)) {
-                wasModified = true;
-                // Optimize file comparison based on file type
-                if (relativePath.toString().endsWith(".class")) {
-                    compareClassFiles(oldPath, newPath, relativePath.toString(), result);
-                } else if (relativePath.toString().endsWith(".nbt")) {
-                    compareNbtFiles(oldPath, newPath, relativePath.toString(), result);
-                } else if (isTextFile(relativePath.toString())) {
-                    compareTextFiles(oldPath, newPath, relativePath.toString(), result);
-                } else {
-                    String details = String.format("Binary content changed (size: %d bytes)", oldSize);
-                    LOGGER.debug("Binary file modified: {}", relativePath);
-                    result.addModifiedFile(relativePath.toString(), "BINARY_MODIFIED", details);
-                }
+            if (!Arrays.equals(oldContent, newContent)) {
+                result.addModifiedFile(relativePath, "CONTENT_MODIFIED", 
+                    "Content changed while size remained same");
+                return true;
             }
-        } catch (Exception e) {
-            LOGGER.error("Error comparing file: {} - {}", relativePath, e.getMessage());
-            result.addModifiedFile(relativePath.toString(), "COMPARISON_ERROR", 
-                "Error during comparison: " + e.getMessage());
-            return true;
+            
+            return false;
+        } catch (IOException e) {
+            LOGGER.error("Error comparing files: {} and {}", oldPath, newPath, e);
+            return false;
         }
-        
-        return wasModified;
     }
 
     private void compareTextFiles(Path oldPath, Path newPath, String relativePath, ComparisonResult result) throws IOException {
@@ -725,78 +757,76 @@ public class MinecraftVersionHandler {
     }
 
     public static class ComparisonResult {
-        private final Map<String, FileModification> modifications = new HashMap<>();
-        private final Set<String> added = new HashSet<>();
-        private final Set<String> removed = new HashSet<>();
-        
-        public void addModifiedFile(String path, String type, String details) {
-            LOGGER.info("Adding modified file: {} ({})", path, type);
-            modifications.put(path, new FileModification(type, details));
+        private final Map<String, FileModification> modifications = new ConcurrentHashMap<>();
+        private final Set<String> added = ConcurrentHashMap.newKeySet();
+        private final Set<String> removed = ConcurrentHashMap.newKeySet();
+
+        // Add these getter methods
+        public Set<String> getAddedFiles() {
+            return Collections.unmodifiableSet(added);
         }
-        
+
+        public Set<String> getRemovedFiles() {
+            return Collections.unmodifiableSet(removed);
+        }
+
+        public Map<String, FileModification> getModifications() {
+            return Collections.unmodifiableMap(modifications);
+        }
+
+        // Add these methods for modifying the collections
         public void addAddedFile(String path) {
-            LOGGER.info("Adding new file: {}", path);
             added.add(path);
         }
-        
+
         public void addRemovedFile(String path) {
-            LOGGER.info("Adding removed file: {}", path);
             removed.add(path);
         }
-        
-        public Map<String, FileModification> getModifications() {
-            return new HashMap<>(modifications);
+
+        public void addModifiedFile(String path, String type, String details) {
+            modifications.put(path, new FileModification(type, details));
         }
-        
-        public Set<String> getAddedFiles() {
-            return new HashSet<>(added);
-        }
-        
-        public Set<String> getRemovedFiles() {
-            return new HashSet<>(removed);
-        }
-        
+
+        // Fix the toString method
         @Override
         public String toString() {
             StringBuilder sb = new StringBuilder();
-            sb.append("===== Comparison Results =====\n");
-            
+            sb.append("===== Comparison Results =====\n\n");
+
             // Summary
-            sb.append(String.format("Total Files: %d\n", added.size() + removed.size() + modifications.size()));
+            sb.append(String.format("Total Changes: %d\n", added.size() + removed.size() + modifications.size()));
             sb.append(String.format("Added Files: %d\n", added.size()));
             sb.append(String.format("Removed Files: %d\n", removed.size()));
             sb.append(String.format("Modified Files: %d\n\n", modifications.size()));
-            
+
             // Added Files
             if (!added.isEmpty()) {
-                sb.append("Added Files:\n");
+                sb.append("=== Added Files ===\n");
                 added.stream().sorted().forEach(file -> 
-                    sb.append(String.format("  + %s\n", file))
-                );
+                    sb.append(String.format("  + %s\n", file)));
                 sb.append("\n");
             }
-            
+
             // Removed Files
             if (!removed.isEmpty()) {
-                sb.append("Removed Files:\n");
+                sb.append("=== Removed Files ===\n");
                 removed.stream().sorted().forEach(file -> 
-                    sb.append(String.format("  - %s\n", file))
-                );
+                    sb.append(String.format("  - %s\n", file)));
                 sb.append("\n");
             }
-            
+
             // Modified Files
             if (!modifications.isEmpty()) {
-                sb.append("Modified Files:\n");
+                sb.append("=== Modified Files ===\n");
                 modifications.entrySet().stream()
                     .sorted(Map.Entry.comparingByKey())
                     .forEach(entry -> {
                         sb.append(String.format("  ~ %s\n", entry.getKey()));
                         sb.append(String.format("    Type: %s\n", entry.getValue().getType()));
-                        sb.append(String.format("    Changes: %s\n", entry.getValue().getDetails()));
+                        sb.append(String.format("    %s\n", entry.getValue().getDetails()));
                     });
             }
-            
+
             return sb.toString();
         }
     }
