@@ -204,15 +204,28 @@ public class MinecraftVersionHandler {
                         result.addRemovedFile(relativePath.toString());
                         removedFilesCount.incrementAndGet();
                         
-                        // Log removed file details
                         fileChangeDetails.computeIfAbsent("REMOVED", k -> new CopyOnWriteArrayList<>())
                             .add(relativePath.toString());
                     } else {
                         // Compare files
-                        compareFile(oldVersionDir.toPath(), newVersionDir.toPath(), relativePath, result);
-                        modifiedFilesCount.incrementAndGet();
+                        try {
+                            boolean wasModified = compareFile(oldVersionDir.toPath(), newVersionDir.toPath(), relativePath, result);
+                            if (wasModified) {
+                                modifiedFilesCount.incrementAndGet();
+                                // Log modified file details
+                                long oldSize = Files.size(oldVersionDir.toPath().resolve(relativePath));
+                                long newSize = Files.size(newVersionDir.toPath().resolve(relativePath));
+                                String changeType = determineChangeType(oldSize, newSize);
+                                
+                                fileChangeDetails.computeIfAbsent("MODIFIED", k -> new CopyOnWriteArrayList<>())
+                                    .add(String.format("%s (%s, Old size: %d bytes, New size: %d bytes)", 
+                                        relativePath, changeType, oldSize, newSize));
+                            }
+                        } catch (IOException e) {
+                            LOGGER.error("Error comparing files for path {}", relativePath, e);
+                        }
                     }
-                } catch (IOException e) {
+                } catch (Exception e) {
                     LOGGER.error("Error processing old file {}", relativePath, e);
                 }
             });
@@ -262,18 +275,19 @@ public class MinecraftVersionHandler {
     }
 
     private String determineFileType(String filename) {
-        String lowercaseFilename = filename.toLowerCase();
+        if (filename.endsWith(".class")) return "Java Class";
+        if (filename.endsWith(".java")) return "Java Source";
+        if (filename.endsWith(".json")) return "JSON";
+        if (filename.endsWith(".txt")) return "Text";
+        if (filename.endsWith(".xml")) return "XML";
+        if (filename.endsWith(".properties")) return "Properties";
+        if (filename.endsWith(".yml") || filename.endsWith(".yaml")) return "YAML";
+        if (filename.endsWith(".nbt")) return "NBT Data";
+        if (filename.endsWith(".mcmeta")) return "Minecraft Metadata";
+        if (filename.endsWith(".dat")) return "Data File";
+        if (filename.endsWith(".png") || filename.endsWith(".jpg") || filename.endsWith(".jpeg")) return "Image";
         
-        if (lowercaseFilename.endsWith(".class")) return "Java Class";
-        if (lowercaseFilename.endsWith(".java")) return "Java Source";
-        if (lowercaseFilename.endsWith(".json")) return "JSON";
-        if (lowercaseFilename.endsWith(".txt")) return "Text";
-        if (lowercaseFilename.endsWith(".xml")) return "XML";
-        if (lowercaseFilename.endsWith(".properties")) return "Properties";
-        if (lowercaseFilename.endsWith(".yml") || lowercaseFilename.endsWith(".yaml")) return "YAML";
-        if (lowercaseFilename.endsWith(".nbt")) return "NBT Data";
-        
-        return "Unknown";
+        return "Unknown File Type";
     }
 
     private void generateComparisonReport(
@@ -299,19 +313,27 @@ public class MinecraftVersionHandler {
         if (!fileChangeDetails.isEmpty()) {
             LOGGER.info("===== Detailed File Changes =====");
             
-            // Log Added Files Details
+            // Log New Files (Added)
             if (fileChangeDetails.containsKey("ADDED")) {
-                LOGGER.info("Added Files Details:");
+                LOGGER.info("New Files in {} (not present in {}):", mcVersion, cleanVersion);
                 fileChangeDetails.get("ADDED").forEach(file -> 
                     LOGGER.info("  + {}", file)
                 );
             }
             
-            // Log Removed Files Details
+            // Log Removed Files
             if (fileChangeDetails.containsKey("REMOVED")) {
-                LOGGER.info("Removed Files Details:");
+                LOGGER.info("Removed Files (present in {} but not in {}):", cleanVersion, mcVersion);
                 fileChangeDetails.get("REMOVED").forEach(file -> 
                     LOGGER.info("  - {}", file)
+                );
+            }
+            
+            // Log Modified Files
+            if (fileChangeDetails.containsKey("MODIFIED")) {
+                LOGGER.info("Modified Files (changed between versions):");
+                fileChangeDetails.get("MODIFIED").forEach(file -> 
+                    LOGGER.info("  ~ {}", file)
                 );
             }
         }
@@ -331,9 +353,10 @@ public class MinecraftVersionHandler {
         LOGGER.info("Modified Files: {:.2f}%", modifiedPercentage);
     }
 
-    private void compareFile(Path oldBasePath, Path newBasePath, Path relativePath, ComparisonResult result) throws IOException {
+    private boolean compareFile(Path oldBasePath, Path newBasePath, Path relativePath, ComparisonResult result) throws IOException {
         Path oldPath = oldBasePath.resolve(relativePath);
         Path newPath = newBasePath.resolve(relativePath);
+        boolean wasModified = false;
 
         try {
             // Compare file sizes first (quick check)
@@ -343,9 +366,9 @@ public class MinecraftVersionHandler {
             if (oldSize != newSize) {
                 String sizeChange = String.format("Size changed from %d to %d bytes (difference: %d bytes)", 
                     oldSize, newSize, (newSize - oldSize));
-                LOGGER.info("File size change detected in {}: {}", relativePath, sizeChange);
+                LOGGER.debug("File size change detected in {}: {}", relativePath, sizeChange);
                 result.addModifiedFile(relativePath.toString(), "SIZE_CHANGED", sizeChange);
-                return;
+                return true;
             }
             
             // Compare content
@@ -353,6 +376,7 @@ public class MinecraftVersionHandler {
             String newHash = fileCache.getFileHash(newPath);
             
             if (!oldHash.equals(newHash)) {
+                wasModified = true;
                 // Optimize file comparison based on file type
                 if (relativePath.toString().endsWith(".class")) {
                     compareClassFiles(oldPath, newPath, relativePath.toString(), result);
@@ -362,7 +386,7 @@ public class MinecraftVersionHandler {
                     compareTextFiles(oldPath, newPath, relativePath.toString(), result);
                 } else {
                     String details = String.format("Binary content changed (size: %d bytes)", oldSize);
-                    LOGGER.info("Binary file modified: {}", relativePath);
+                    LOGGER.debug("Binary file modified: {}", relativePath);
                     result.addModifiedFile(relativePath.toString(), "BINARY_MODIFIED", details);
                 }
             }
@@ -370,7 +394,10 @@ public class MinecraftVersionHandler {
             LOGGER.error("Error comparing file: {} - {}", relativePath, e.getMessage());
             result.addModifiedFile(relativePath.toString(), "COMPARISON_ERROR", 
                 "Error during comparison: " + e.getMessage());
+            return true;
         }
+        
+        return wasModified;
     }
 
     private void compareTextFiles(Path oldPath, Path newPath, String relativePath, ComparisonResult result) throws IOException {
@@ -867,5 +894,11 @@ public class MinecraftVersionHandler {
             LOGGER.error("Error walking directory: {}", dir, e);
             throw new ComparisonException("Failed to walk directory", e);
         }
+    }
+
+    private String determineChangeType(long oldSize, long newSize) {
+        if (oldSize == newSize) return "Content changed";
+        else if (oldSize < newSize) return "Size increased";
+        else return "Size decreased";
     }
 }
