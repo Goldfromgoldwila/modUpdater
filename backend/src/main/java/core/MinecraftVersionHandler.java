@@ -84,6 +84,8 @@ public class MinecraftVersionHandler {
     }
 
     public ComparisonResult compareMinecraftVersions(String cleanVersion, String mcVersion) {
+        LOGGER.info("Starting comparison between versions: {} and {}", cleanVersion, mcVersion);
+
         this.cleanVersion = cleanVersion;
         this.mcVersion = mcVersion;
         
@@ -103,6 +105,7 @@ public class MinecraftVersionHandler {
 
             long endTime = System.currentTimeMillis();
             LOGGER.info("Comparison completed in {} ms", endTime - startTime);
+            LOGGER.info("Conversion completed successfully!");
             
             return result;
         } catch (ValidationException e) {
