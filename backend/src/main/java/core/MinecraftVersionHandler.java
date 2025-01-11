@@ -352,16 +352,32 @@ public class MinecraftVersionHandler {
         LOGGER.info("Verification: {} (total) = {} (unchanged) + {} (added) + {} (removed) + {} (modified)",
             processedFiles, unchangedFiles, addedFiles, removedFiles, modifiedFiles);
         
-        // Optional: Log some unchanged files for verification (limit to first 10)
-        if (!fileChangeDetails.getOrDefault("UNCHANGED", Collections.emptyList()).isEmpty()) {
-            LOGGER.debug("Sample of Unchanged Files (first 10):");
-            fileChangeDetails.get("UNCHANGED").stream()
-                .limit(10)
-                .forEach(file -> LOGGER.debug("  = {}", file));
+        // Detailed File Changes
+        LOGGER.info("===== Detailed File Changes =====");
+        
+        // Added Files
+        if (!fileChangeDetails.getOrDefault("ADDED", Collections.emptyList()).isEmpty()) {
+            LOGGER.info("Added Files:");
+            fileChangeDetails.get("ADDED").stream()
+                .sorted()
+                .forEach(file -> LOGGER.info("  + {}", file));
         }
         
-        // Rest of the detailed file changes logging...
-        // ... (keep existing logging for added/removed/modified files)
+        // Removed Files
+        if (!fileChangeDetails.getOrDefault("REMOVED", Collections.emptyList()).isEmpty()) {
+            LOGGER.info("Removed Files:");
+            fileChangeDetails.get("REMOVED").stream()
+                .sorted()
+                .forEach(file -> LOGGER.info("  - {}", file));
+        }
+        
+        // Modified Files
+        if (!fileChangeDetails.getOrDefault("MODIFIED", Collections.emptyList()).isEmpty()) {
+            LOGGER.info("Modified Files:");
+            fileChangeDetails.get("MODIFIED").stream()
+                .sorted()
+                .forEach(file -> LOGGER.info("  ~ {}", file));
+        }
     }
 
     private boolean compareFile(Path oldBasePath, Path newBasePath, Path relativePath, ComparisonResult result) throws IOException {
@@ -625,7 +641,7 @@ public class MinecraftVersionHandler {
             
             boolean isValid = version.matches("^[0-9]+(\\.[0-9]+)*$");
             LOGGER.debug("Version validation: {} -> {}", version, isValid);
-            return isValid;
+            return isValid;  
         }
     }
 
@@ -743,18 +759,42 @@ public class MinecraftVersionHandler {
         @Override
         public String toString() {
             StringBuilder sb = new StringBuilder();
-            sb.append("Comparison Results:\n");
-            sb.append(String.format("Added files: %d\n", added.size()));
-            sb.append(String.format("Removed files: %d\n", removed.size()));
-            sb.append(String.format("Modified files: %d\n", modifications.size()));
+            sb.append("===== Comparison Results =====\n");
             
+            // Summary
+            sb.append(String.format("Total Files: %d\n", added.size() + removed.size() + modifications.size()));
+            sb.append(String.format("Added Files: %d\n", added.size()));
+            sb.append(String.format("Removed Files: %d\n", removed.size()));
+            sb.append(String.format("Modified Files: %d\n\n", modifications.size()));
+            
+            // Added Files
+            if (!added.isEmpty()) {
+                sb.append("Added Files:\n");
+                added.stream().sorted().forEach(file -> 
+                    sb.append(String.format("  + %s\n", file))
+                );
+                sb.append("\n");
+            }
+            
+            // Removed Files
+            if (!removed.isEmpty()) {
+                sb.append("Removed Files:\n");
+                removed.stream().sorted().forEach(file -> 
+                    sb.append(String.format("  - %s\n", file))
+                );
+                sb.append("\n");
+            }
+            
+            // Modified Files
             if (!modifications.isEmpty()) {
-                sb.append("\nModified Files Details:\n");
-                modifications.forEach((path, mod) -> {
-                    sb.append(String.format("- %s\n", path));
-                    sb.append(String.format("  Type: %s\n", mod.getType()));
-                    sb.append(String.format("  Changes: %s\n", mod.getDetails()));
-                });
+                sb.append("Modified Files:\n");
+                modifications.entrySet().stream()
+                    .sorted(Map.Entry.comparingByKey())
+                    .forEach(entry -> {
+                        sb.append(String.format("  ~ %s\n", entry.getKey()));
+                        sb.append(String.format("    Type: %s\n", entry.getValue().getType()));
+                        sb.append(String.format("    Changes: %s\n", entry.getValue().getDetails()));
+                    });
             }
             
             return sb.toString();
