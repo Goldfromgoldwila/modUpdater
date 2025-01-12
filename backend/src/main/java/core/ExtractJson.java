@@ -7,7 +7,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RequestMapping;
-import core.MinecraftVersionHandler.ComparisonResult;
 import java.io.*;
 import java.nio.file.*;
 import java.util.*;
@@ -21,74 +20,147 @@ public class ExtractJson {
     private static final String DECOMPILED_DIR = "decompiled_mods";
     private static final String MOD_JSON_FILE = "fabric.mod.json";
 
-    private String mcVersion; // Add this line to declare mcVersion
+    private String mcVersion;
+    private String cleanVersion;
+    private final MinecraftVersionHandler versionHandler;
+
+    // Define ComparisonResult enum here to avoid dependency issues
+    public enum VersionCompatibility {
+        COMPATIBLE,
+        INCOMPATIBLE,
+        UNKNOWN
+    }
 
     private static final Map<String, String> FABRIC_LOADER_VERSIONS = Map.of(
-        "1.20", ">=0.14.21",
-        "1.20.1", ">=0.14.21",
-        "1.20.2", ">=0.14.21",
-        "1.20.3", ">=0.15.0",
-        "1.20.4", ">=0.15.0",
-        "1.21", ">=0.15.0",
-        "1.21.1", ">=0.15.0",
-        "1.21.2", ">=0.15.0",
+        "1.21", ">=0.14.21",
+        "1.21.1", ">=0.14.21",
+        "1.21.2", ">=0.14.21",
         "1.21.3", ">=0.15.0",
         "1.21.4", ">=0.15.0"
     );
 
     private static final Map<String, String> FABRIC_API_VERSIONS = Map.of(
-        "1.20", ">=0.83.0",
-        "1.20.1", ">=0.83.0",
-        "1.20.2", ">=0.89.0",
-        "1.20.3", ">=0.91.0",
-        "1.20.4", ">=0.91.0",
-        "1.21", ">=0.92.0",
-        "1.21.1", ">=0.92.0",
-        "1.21.2", ">=0.92.0",
-        "1.21.3", ">=0.92.0",
-        "1.21.4", ">=0.92.0"
+        "1.21", ">=0.83.0",
+        "1.21.1", ">=0.83.0",
+        "1.21.2", ">=0.89.0",
+        "1.21.3", ">=0.91.0",
+        "1.21.4", ">=0.91.0"
     );
-
-    private String cleanVersion;
-
-    private final MinecraftVersionHandler versionHandler;
 
     @Autowired
     public ExtractJson(MinecraftVersionHandler versionHandler) {
         this.versionHandler = versionHandler;
     }
 
-    public void processMod(String mcVersion) {
+    public void processMod(String targetVersion) {
         try {
-            LOGGER.info("Processing mod for Minecraft version: {}", mcVersion);
-            File decompDir = findLatestModDirectory();
-
-            if (decompDir != null) {
-                File modJsonFile = new File(decompDir, MOD_JSON_FILE);
-                int retryCount = 0;
-                int maxRetries = 5;
-
-                while (!modJsonFile.exists() && retryCount < maxRetries) {
-                    LOGGER.info("Mod JSON file not found: {}. Retrying in 4 seconds...", modJsonFile.getPath());
-                    Thread.sleep(4000);
-                    retryCount++;
-                }
-
-                if (modJsonFile.exists()) {
-                    LOGGER.info("Mod JSON file found: {}", modJsonFile.getPath());
-                    modifyJsonFile(modJsonFile, mcVersion);
-                } else {
-                    LOGGER.error("Mod JSON file not found: {}", modJsonFile.getPath());
-                }
-            } else {
-                LOGGER.error("No decompiled directory found.");
-                LOGGER.info("Retrying in 5 seconds...");
-                Thread.sleep(5000);
-                processMod(mcVersion);
+            LOGGER.info("Starting mod processing for target version: {}", targetVersion);
+            File modDir = findLatestModDirectory();
+            if (modDir == null) {
+                throw new IllegalStateException("No decompiled directory found");
             }
+
+            File modJsonFile = new File(modDir, MOD_JSON_FILE);
+            if (!waitForModJson(modJsonFile)) {
+                throw new IllegalStateException("Mod JSON file not found after waiting");
+            }
+
+            JsonObject modJson = readAndValidateModJson(modJsonFile, targetVersion);
+            updateModJson(modJson, modJsonFile, targetVersion);
+
         } catch (Exception e) {
             LOGGER.error("Error processing mod: {}", e.getMessage(), e);
+            throw new RuntimeException("Mod processing failed", e);
         }
+    }
+
+    private boolean waitForModJson(File modJsonFile) {
+        int retryCount = 0;
+        int maxRetries = 5;
+        while (!modJsonFile.exists() && retryCount < maxRetries) {
+            LOGGER.info("Waiting for mod JSON file (attempt {}/{})", retryCount + 1, maxRetries);
+            try {
+                Thread.sleep(2000); // Reduced wait time to 2 seconds
+                retryCount++;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return modJsonFile.exists();
+    }
+
+    private JsonObject readAndValidateModJson(File modJsonFile, String targetVersion) throws IOException {
+        JsonObject modJson = readJsonFile(modJsonFile);
+        JsonObject depends = getOrCreateDependsObject(modJson);
+        
+        if (depends.has("minecraft")) {
+            String currentVersion = depends.get("minecraft").getAsString();
+            this.cleanVersion = processMinecraftVersion(currentVersion);
+            this.mcVersion = targetVersion;
+            
+            LOGGER.info("Current mod version: {}, Target version: {}", cleanVersion, targetVersion);
+            
+            // Validate version compatibility
+            try {
+                if (!isVersionCompatible(cleanVersion, targetVersion)) {
+                    throw new IllegalArgumentException(
+                        String.format("Incompatible version change from %s to %s", cleanVersion, targetVersion)
+                    );
+                }
+            } catch (Exception e) {
+                LOGGER.error("Version comparison failed", e);
+                throw new IllegalStateException("Version validation failed", e);
+            }
+        } else {
+            LOGGER.warn("No Minecraft version found in mod dependencies");
+            this.mcVersion = targetVersion;
+        }
+        
+        return modJson;
+    }
+
+    private boolean isVersionCompatible(String currentVersion, String targetVersion) {
+        // Simple version compatibility check
+        String[] current = currentVersion.split("\\.");
+        String[] target = targetVersion.split("\\.");
+        
+        // Compare major versions
+        int currentMajor = Integer.parseInt(current[0]);
+        int targetMajor = Integer.parseInt(target[0]);
+        
+        if (currentMajor != targetMajor) {
+            return false;
+        }
+        
+        // Compare minor versions
+        int currentMinor = current.length > 1 ? Integer.parseInt(current[1]) : 0;
+        int targetMinor = target.length > 1 ? Integer.parseInt(target[1]) : 0;
+        
+        // Allow updates within the same major version
+        return currentMinor <= targetMinor;
+    }
+
+    private void updateModJson(JsonObject modJson, File modJsonFile, String targetVersion) throws IOException {
+        JsonObject depends = modJson.getAsJsonObject("depends");
+        
+        // Update Minecraft version
+        depends.addProperty("minecraft", targetVersion);
+        
+        // Update Fabric dependencies
+        String loaderVersion = FABRIC_LOADER_VERSIONS.get(targetVersion);
+        String apiVersion = FABRIC_API_VERSIONS.get(targetVersion);
+        
+        if (loaderVersion != null) {
+            depends.addProperty("fabricloader", loaderVersion);
+        }
+        if (apiVersion != null) {
+            depends.addProperty("fabric-api", apiVersion);
+        }
+
+        LOGGER.info("Updated dependencies: {}", depends);
+        saveJsonFile(modJsonFile, modJson);
+        logFileContent(modJsonFile);
     }
 
     private File findLatestModDirectory() {
@@ -100,73 +172,9 @@ public class ExtractJson {
                     .map(Path::toFile)
                     .orElse(null);
         } catch (IOException e) {
-            LOGGER.error("Error finding latest mod directory: {}", e.getMessage());
+            LOGGER.error("Error finding latest mod directory", e);
             return null;
         }
-    }
-
-    private void modifyJsonFile(File modJsonFile, String mcVersion) throws IOException {
-        logFileContent(modJsonFile);
-        JsonObject jsonObject = readJsonFile(modJsonFile);
-        JsonObject depends = getOrCreateDependsObject(jsonObject);
-
-        LOGGER.info("Old JSON data: {}", jsonObject);
-        LOGGER.info("Old dependencies: {}", depends);
-
-        if (depends.has("minecraft")) {
-            String currentMinecraftVersion = depends.get("minecraft").getAsString();
-            LOGGER.info("Current Minecraft version: {}", currentMinecraftVersion);
-
-            this.cleanVersion = processMinecraftVersion(currentMinecraftVersion);
-            this.mcVersion = mcVersion;
-
-            depends.addProperty("minecraft", mcVersion);
-            LOGGER.info("Updated Minecraft version from {} to {}", currentMinecraftVersion, mcVersion);
-            LOGGER.info("Clean version: {}", this.cleanVersion);
-        } else {
-            depends.addProperty("minecraft", mcVersion);
-            LOGGER.info("Added Minecraft version: {}", mcVersion);
-        }
-
-        LOGGER.info("Updated depends object: {}", depends);
-
-       // Update Fabric dependencies
-        String loaderVersion = FABRIC_LOADER_VERSIONS.get(mcVersion);
-        if (loaderVersion != null) {
-            String oldLoaderVersion = depends.has("fabricloader") ? depends.get("fabricloader").getAsString() : "not set";
-            depends.addProperty("fabricloader", loaderVersion);
-            LOGGER.info("Updated Fabric Loader version from {} to {}", oldLoaderVersion, loaderVersion);
-        }
-
-        String apiVersion = FABRIC_API_VERSIONS.get(mcVersion);
-        if (apiVersion != null) {
-            String oldApiVersion = depends.has("fabric-api") ? depends.get("fabric-api").getAsString() : "not set";
-            depends.addProperty("fabric-api", apiVersion);
-            LOGGER.info("Updated Fabric API version from {} to {}", oldApiVersion, apiVersion);
-        }
-
-        LOGGER.info("New dependencies: {}", depends);
-
-        saveJsonFile(modJsonFile, jsonObject);
-        logFileContent(modJsonFile);
-
-        triggerVersionComparison();
-        LOGGER.info("Triggering version comparison between cleanVersion: {} and mcVersion: {}", cleanVersion, mcVersion);
-    }
-
-    private String processMinecraftVersion(String versionString) {
-        versionString = versionString.trim();
-
-        if (versionString.contains(" ")) {
-            String[] parts = versionString.split("\\s+");
-            for (int i = parts.length - 1; i >= 0; i--) {
-                String part = parts[i].replaceAll("[^0-9.]", "");
-                if (!part.isEmpty()) {
-                    return part;
-                }
-            }
-        }
-        return versionString.replaceAll("[^0-9.]", "");
     }
 
     private JsonObject readJsonFile(File file) throws IOException {
@@ -175,56 +183,45 @@ public class ExtractJson {
         }
     }
 
-    private void logFileContent(File file) {
-        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                LOGGER.info(line);
-            }
-        } catch (IOException e) {
-            LOGGER.error("Error reading file: {}", e.getMessage());
+    private void saveJsonFile(File file, JsonObject jsonObject) throws IOException {
+        try (FileWriter writer = new FileWriter(file)) {
+            new GsonBuilder().setPrettyPrinting().create().toJson(jsonObject, writer);
         }
     }
 
     private JsonObject getOrCreateDependsObject(JsonObject jsonObject) {
         if (!jsonObject.has("depends")) {
             jsonObject.add("depends", new JsonObject());
-            LOGGER.info("Created 'depends' section.");
         }
         return jsonObject.getAsJsonObject("depends");
     }
 
-    private void saveJsonFile(File file, JsonObject jsonObject) throws IOException {
-        try (FileWriter writer = new FileWriter(file)) {
-            Gson gson = new GsonBuilder().setPrettyPrinting().create();
-            gson.toJson(jsonObject, writer);
-            LOGGER.info("Successfully saved updated JSON to file: {}", file.getPath());
+    private String processMinecraftVersion(String versionString) {
+        versionString = versionString.trim();
+        if (versionString.contains(" ")) {
+            return Arrays.stream(versionString.split("\\s+"))
+                    .map(part -> part.replaceAll("[^0-9.]", ""))
+                    .filter(part -> !part.isEmpty())
+                    .findFirst()
+                    .orElse(versionString);
+        }
+        return versionString.replaceAll("[^0-9.]", "");
+    }
+
+    private void logFileContent(File file) {
+        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+            reader.lines().forEach(LOGGER::info);
         } catch (IOException e) {
-            LOGGER.error("Error saving JSON file: {}", e.getMessage());
-            throw e;
+            LOGGER.error("Error reading file: {}", e.getMessage());
         }
     }
 
-    // Getter for cleanVersion
+    // Getters
     public String getCleanVersion() {
         return cleanVersion;
     }
 
-    // Getter for mcVersion
     public String getMcVersion() {
         return mcVersion;
     }
-
-    private void triggerVersionComparison() {
-        LOGGER.info("Triggering comparison between cleanVersion: {} and mcVersion: {}", cleanVersion, mcVersion);
-        try {
-            ComparisonResult result = versionHandler.compareMinecraftVersions(cleanVersion, mcVersion);
-            LOGGER.info("Comparison result: {}", result);
-        } catch (IOException e) {
-            LOGGER.error("Error during version comparison: {}", e.getMessage(), e);
-        } catch (Exception e) {
-            LOGGER.error("Unexpected error during version comparison: {}", e.getMessage(), e);
-        }
-    }
-
 }

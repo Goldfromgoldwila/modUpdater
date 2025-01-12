@@ -4,6 +4,7 @@ core\MinecraftVersionHandler$ValidationException.class
 core\MinecraftVersionHandler$FileCache$CacheEntry.class
 core\ModDecompilerService.class
 core\WebConfig.class
+core\ExtractJson$VersionCompatibility.class
 core\Main.class
 core\MinecraftVersionHandler$FileComparison.class
 core\MinecraftVersionHandler$ValidationService.class

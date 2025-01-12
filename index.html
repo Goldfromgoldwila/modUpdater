@@ -24,9 +24,23 @@
     </form>
 
 
-    <p id="result-message"></p>
+    <div id="drop-zone" class="drop-zone">
+        <p>Drag and drop a .jar file here or click to select</p>
+    </div>
+    
+    <input type="file" id="file-input" accept=".jar" style="display: none;">
+    <button id="upload-button" style="display: none;">Upload</button>
+    
+    <div class="progress-container">
+        <progress id="progress-bar" value="0" max="100" style="display: none;"></progress>
+        <p id="progress-text"></p>
+    </div>
+    
+    <div id="result"></div>
+    
+    <!-- Add this before the closing </body> tag -->
+    <script src="upload.js"></script>
 
-    <script src="./versionSelector.js"></script>
     <script src="./upload.js"></script>
 </body>
 </html>

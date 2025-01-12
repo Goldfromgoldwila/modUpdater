@@ -771,17 +771,28 @@ public class MinecraftVersionHandler {
             String[] lines = diff.split("\n");
             
             for (String line : lines) {
-                // Skip EQUAL lines unless they contain meaningful content
-                if (line.contains("[EQUAL,") && 
-                    (line.trim().endsWith(",") || line.trim().endsWith("]"))) {
+                // Skip EQUAL lines as they don't represent changes
+                if (line.startsWith("[EQUAL,")) {
                     continue;
                 }
                 
-                // Format INSERT and DELETE lines
+                // Format INSERT lines
                 if (line.contains("[INSERT,")) {
-                    formatted.append("    + ").append(line.replaceAll("\\[INSERT,,\\+(.+)\\+\\]", "$1")).append("\n");
-                } else if (line.contains("[DELETE,")) {
-                    formatted.append("    - ").append(line.replaceAll("\\[DELETE,-(.+)-\\]", "$1")).append("\n");
+                    String content = line.replaceAll("\\[INSERT,,\\+(.+)\\+\\]", "$1");
+                    formatted.append("    + ").append(content).append("\n");
+                    continue;
+                }
+                
+                // Format DELETE lines
+                if (line.contains("[DELETE,")) {
+                    String content = line.replaceAll("\\[DELETE,-(.+)-\\]", "$1");
+                    formatted.append("    - ").append(content).append("\n");
+                    continue;
+                }
+                
+                // Include other lines (like size changes) as is
+                if (line.trim().startsWith("Size:")) {
+                    formatted.append("    ").append(line.trim()).append("\n");
                 }
             }
             

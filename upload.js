@@ -1,80 +1,153 @@
-document.getElementById('uploadForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
+document.addEventListener('DOMContentLoaded', function() {
+    // Get DOM elements with null checks
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const uploadButton = document.getElementById('upload-button');
+    const progressBar = document.getElementById('progress-bar');
+    const progressText = document.getElementById('progress-text');
 
-    const fileInput = document.getElementById('modFile');
-    if (fileInput.files.length === 0) {
-        console.error('No file selected for upload.');
+    // Check if required elements exist
+    if (!dropZone || !fileInput || !uploadButton || !progressBar || !progressText) {
+        console.error('Required DOM elements not found:', {
+            dropZone: !!dropZone,
+            fileInput: !!fileInput,
+            uploadButton: !!uploadButton,
+            progressBar: !!progressBar,
+            progressText: !!progressText
+        });
         return;
     }
 
-    // Fetch or initialize file counter from localStorage
-    let fileCount = parseInt(localStorage.getItem('modFileCount') || '0') + 1;
-    localStorage.setItem('modFileCount', fileCount);
-
-    // Get the selected file and rename it
-    const file = fileInput.files[0];
-    const fileExtension = file.name.split('.').pop();
-    const newFileName = `mod${fileCount}.${fileExtension}`;
-
-    console.log('Renaming File Details:', {
-        originalName: file.name,
-        newName: newFileName,
-        size: file.size,
-        type: file.type
+    console.log('DOM elements loaded successfully');
+    
+    // Add drag and drop event listeners
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
     });
 
-    // Create a new File object with the renamed filename
-    const renamedFile = new File([file], newFileName, { type: file.type });
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('dragover');
+    });
 
-    // Prepare form data
-    const formData = new FormData();
-    formData.append('file', renamedFile);
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        const files = e.dataTransfer.files;
+        handleFiles(files);
+    });
 
-    try {
-        // Check server availability
-        const healthCheck = await fetch('https://modupdater.onrender.com/api/health', {
-            method: 'GET',
-            headers: {
-                'Cache-Control': 'no-cache'
-            },
-            mode: "cors",
-        });
+    // Click to upload
+    dropZone.addEventListener('click', () => {
+        fileInput.click();
+    });
 
-        if (!healthCheck.ok) {
-            throw new Error('Server health check failed');
+    fileInput.addEventListener('change', (e) => {
+        handleFiles(e.target.files);
+    });
+
+    function handleFiles(files) {
+        if (files.length > 0) {
+            const file = files[0];
+            if (file.name.endsWith('.jar')) {
+                console.log(`File selected: ${file.name} (${formatFileSize(file.size)})`);
+                uploadButton.style.display = 'block';
+                uploadButton.textContent = `Upload ${file.name}`;
+            } else {
+                console.error('Invalid file type selected. Please select a .jar file');
+                alert('Please select a .jar file');
+            }
         }
-
-        // Upload the file
-        const response = await fetch('https://modupdater.onrender.com/api/upload', {
-            method: 'POST',
-            body: formData,
-            mode: "cors",
-        });
-
-        // Log the raw response for debugging
-        const textResponse = await response.text(); // Get the response as text
-        console.log('Response from server:', textResponse); // Log the raw response
-
-        // Check if the response is OK
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}, message: ${textResponse}`);
-        }
-
-        // Since the response is plain text, we can log it directly
-        console.log('File uploaded successfully:', textResponse);
-
-        // Fetch logs after upload
-        const logsResponse = await fetch('https://modupdater.onrender.com/api/logs');
-        if (logsResponse.ok) {
-            const logs = await logsResponse.json(); // Parse logs response
-            console.log('Server Logs:', logs);
-        } else {
-            console.error('Failed to fetch logs:', logsResponse.statusText);
-        }
-
-    } catch (error) {
-        console.error('Upload error:', error);
     }
 
+    uploadButton.addEventListener('click', async () => {
+        const file = fileInput.files[0];
+        const selectedVersion = document.getElementById("mc-version").value;
+        
+        if (!file) {
+            console.error('No file selected');
+            alert('Please select a file first');
+            return;
+        }
 
+        console.log(`Starting upload process for ${file.name}`);
+        console.log(`Selected Minecraft version: ${selectedVersion}`);
+
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('version', selectedVersion);
+
+        try {
+            progressBar.style.display = 'block';
+            progressBar.value = 0;
+            progressText.textContent = 'Uploading...';
+            uploadButton.disabled = true;
+
+            console.log('Uploading file to server...');
+            const response = await fetch('https://modupdater.onrender.com/api/upload', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                throw new Error(`Upload failed: ${response.statusText}`);
+            }
+
+            console.log('File upload successful');
+            progressBar.value = 50;
+            progressText.textContent = 'Processing...';
+
+            console.log('Starting conversion process...');
+            const convertResponse = await fetch("https://modupdater.onrender.com/api/convert", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ version: selectedVersion })
+            });
+
+            if (!convertResponse.ok) {
+                throw new Error(`Conversion failed: ${convertResponse.statusText}`);
+            }
+
+            const result = await convertResponse.json();
+            console.log("Conversion successful!", result);
+            console.log("Changes found:", {
+                added: result.added?.length || 0,
+                removed: result.removed?.length || 0,
+                modified: result.modified?.length || 0
+            });
+
+            progressBar.value = 100;
+            progressText.textContent = 'Complete!';
+            
+            const resultDiv = document.getElementById("result");
+            if (resultDiv) {
+                resultDiv.innerHTML = `
+                    <h3>Conversion Complete!</h3>
+                    <pre>${JSON.stringify(result, null, 2)}</pre>
+                `;
+            }
+
+        } catch (error) {
+            console.error('Error during process:', error);
+            console.error('Error details:', {
+                message: error.message,
+                type: error.name,
+                stack: error.stack
+            });
+            progressText.textContent = `Error: ${error.message}`;
+            progressBar.classList.add('error');
+        } finally {
+            console.log('Process completed');
+            uploadButton.disabled = false;
+        }
+    });
+
+    // Utility function to format file size
+    function formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
 });
