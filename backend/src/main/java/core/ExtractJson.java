@@ -79,7 +79,7 @@ public class ExtractJson {
             if (depends.has("minecraft")) {
                 currentVersion = depends.get("minecraft").getAsString();
                 this.cleanVersion = processMinecraftVersion(currentVersion);
-                LOGGER.info("Current minecraft version: {}, Cleaned version: {}", currentVersion, cleanVersion);
+                logCurrentVersion(currentVersion, cleanVersion);
             }
 
             // Call MinecraftVersionHandler first for validation
@@ -276,15 +276,32 @@ public class ExtractJson {
     }
 
     private String processMinecraftVersion(String versionString) {
+        if (versionString == null || versionString.trim().isEmpty()) {
+            return "";
+        }
+
         versionString = versionString.trim();
+        
+        // Handle version range format (e.g., ">=1.20 <=1.20.1")
         if (versionString.contains(" ")) {
             return Arrays.stream(versionString.split("\\s+"))
-                    .map(part -> part.replaceAll("[^0-9.]", ""))
+                    .map(this::cleanVersionString)
                     .filter(part -> !part.isEmpty())
                     .findFirst()
-                    .orElse(versionString);
+                    .orElse("");
         }
-        return versionString.replaceAll("[^0-9.]", "");
+        
+        return cleanVersionString(versionString);
+    }
+
+    private String cleanVersionString(String version) {
+        // Remove any prefix/comparators (>=, <=, >, <, =)
+        return version.replaceAll("[^0-9.]", "");
+    }
+
+    private void logCurrentVersion(String currentVersion, String cleanVersion) {
+        LOGGER.info("Found minecraft version in depends: {}", currentVersion);
+        LOGGER.info("Cleaned version for comparison: {}", cleanVersion);
     }
 
     private void logFileContent(File file) {
