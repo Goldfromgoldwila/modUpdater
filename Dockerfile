@@ -12,4 +12,10 @@ COPY 1.21.2 versions/1.21.2
 COPY 1.21.3 versions/1.21.3
 COPY 1.21.4 versions/1.21.4 
 
+# Copy WinMerge from local project
+COPY winmerge/ /opt/winmerge/
+
+# Set WinMerge path environment variable
+ENV WINMERGE_PATH=/opt/winmerge/WinMergeU.exe
+
 ENTRYPOINT ["java", "-jar", "app.jar"]

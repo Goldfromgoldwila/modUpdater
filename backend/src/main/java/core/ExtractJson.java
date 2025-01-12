@@ -11,7 +11,6 @@ import java.io.*;
 import java.nio.file.*;
 import java.util.*;
 import java.util.regex.*;
-import core.MinecraftVersionHandler.ComparisonResult;  // Add this import
 
 @Component
 @RestController
@@ -82,24 +81,20 @@ public class ExtractJson {
                 this.cleanVersion = processMinecraftVersion(currentVersion);
                 logCurrentVersion(currentVersion, cleanVersion);
                 
-                // Trigger code analysis
+                // Replace analyzeCodeChanges with compareVersions
                 if (versionHandler != null) {
-                    LOGGER.info("Triggering code analysis");
-                    versionHandler.analyzeCodeChanges(cleanVersion, targetVersion);
+                    LOGGER.info("Triggering version comparison");
+                    versionHandler.compareVersions(cleanVersion, targetVersion);
                 } else {
-                    LOGGER.warn("VersionHandler is null, skipping code analysis");
+                    LOGGER.warn("VersionHandler is null, skipping comparison");
                 }
             }
 
-            // Call MinecraftVersionHandler first for validation
+            // Call MinecraftVersionHandler for comparison
             if (versionHandler != null) {
                 try {
-                    ComparisonResult result = versionHandler.compareMinecraftVersions(cleanVersion, targetVersion);
-                    LOGGER.info("Version comparison result: {}", result);
-                    
-                    if (result == null) {
-                        throw new IllegalStateException("Version comparison failed");
-                    }
+                    LOGGER.info("Comparing versions {} and {}", cleanVersion, targetVersion);
+                    versionHandler.compareVersions(cleanVersion, targetVersion);
                 } catch (Exception e) {
                     LOGGER.error("Version validation failed: {}", e.getMessage());
                     throw new IllegalStateException("Version validation failed", e);
@@ -352,13 +347,7 @@ public class ExtractJson {
             // Call version handler methods
             versionHandler.setCleanVersion(sourceVersion);
             versionHandler.setMcVersion(targetVersion);
-            
-            try {
-                ComparisonResult result = versionHandler.compareMinecraftVersions(sourceVersion, targetVersion);
-                LOGGER.info("Version comparison result: {}", result);
-            } catch (Exception e) {
-                LOGGER.error("Error comparing versions: {}", e.getMessage(), e);
-            }
+            versionHandler.compareVersions(sourceVersion, targetVersion);
             
         } catch (Exception e) {
             LOGGER.error("Error in version change processing: {}", e.getMessage(), e);
