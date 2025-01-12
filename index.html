@@ -8,21 +8,13 @@
 </head>
 <body>
     <h1>Welcome to Minecraft Mod Updater</h1>
-    <form id="uploadForm">
-        <input type="file" id="modFile" name="modFile">
-
-        <select id="mc-version">
-            <option value="1.21">1.21</option>
-            <option value="1.21.1">1.21.1</option>
-            <option value="1.21.2">1.21.2</option>
-            <option value="1.21.3">1.21.3</option>
-            <option value="1.21.4">1.21.4</option>
-        </select>
-
-        <button type="submit">Upload</button>
-
-    </form>
-
+    
+    <select id="mc-version">
+        <option value="1.21.1">1.21.1</option>
+        <option value="1.21.2">1.21.2</option>
+        <option value="1.21.3">1.21.3</option>
+        <option value="1.21.4">1.21.4</option>
+    </select>
 
     <div id="drop-zone" class="drop-zone">
         <p>Drag and drop a .jar file here or click to select</p>
@@ -38,9 +30,6 @@
     
     <div id="result"></div>
     
-    <!-- Add this before the closing </body> tag -->
     <script src="upload.js"></script>
-
-    <script src="./upload.js"></script>
 </body>
 </html>

@@ -70,20 +70,31 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        console.log(`Starting upload process for ${file.name}`);
-        console.log(`Selected Minecraft version: ${selectedVersion}`);
-
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('version', selectedVersion);
-
         try {
+            // Create new filename based on timestamp
+            const timestamp = new Date().getTime();
+            const newFileName = `mod${timestamp}.jar`;
+            
+            // Create new File object with the new name
+            const renamedFile = new File([file], newFileName, {
+                type: file.type,
+                lastModified: file.lastModified,
+            });
+
+            console.log(`Original filename: ${file.name}`);
+            console.log(`New filename: ${newFileName}`);
+
+            const formData = new FormData();
+            formData.append('file', renamedFile);
+            formData.append('version', selectedVersion);
+            formData.append('originalName', file.name); // Store original name if needed
+
+            // Show progress
             progressBar.style.display = 'block';
             progressBar.value = 0;
             progressText.textContent = 'Uploading...';
             uploadButton.disabled = true;
 
-            console.log('Uploading file to server...');
             const response = await fetch('https://modupdater.onrender.com/api/upload', {
                 method: 'POST',
                 body: formData

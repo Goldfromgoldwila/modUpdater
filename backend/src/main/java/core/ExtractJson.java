@@ -11,6 +11,7 @@ import java.io.*;
 import java.nio.file.*;
 import java.util.*;
 import java.util.regex.*;
+import core.MinecraftVersionHandler.ComparisonResult;  // Add this import
 
 @Component
 @RestController
@@ -65,8 +66,43 @@ public class ExtractJson {
                 throw new IllegalStateException("Mod JSON file not found after waiting");
             }
 
-            JsonObject modJson = readAndValidateModJson(modJsonFile, targetVersion);
+            // Log original file content
+            LOGGER.info("Original mod JSON content:");
+            logFileContent(modJsonFile);
+
+            // First read the JSON to get current version
+            JsonObject modJson = readJsonFile(modJsonFile);
+            JsonObject depends = getOrCreateDependsObject(modJson);
+            
+            // Get current version and clean it
+            String currentVersion = "";
+            if (depends.has("minecraft")) {
+                currentVersion = depends.get("minecraft").getAsString();
+                this.cleanVersion = processMinecraftVersion(currentVersion);
+                LOGGER.info("Current minecraft version: {}, Cleaned version: {}", currentVersion, cleanVersion);
+            }
+
+            // Call MinecraftVersionHandler first for validation
+            if (versionHandler != null) {
+                try {
+                    ComparisonResult result = versionHandler.compareMinecraftVersions(cleanVersion, targetVersion);
+                    LOGGER.info("Version comparison result: {}", result);
+                    
+                    if (result == null) {
+                        throw new IllegalStateException("Version comparison failed");
+                    }
+                } catch (Exception e) {
+                    LOGGER.error("Version validation failed: {}", e.getMessage());
+                    throw new IllegalStateException("Version validation failed", e);
+                }
+            }
+
+            // Only proceed with updates if version check passes
             updateModJson(modJson, modJsonFile, targetVersion);
+
+            // Log modified file content
+            LOGGER.info("Modified mod JSON content:");
+            logFileContent(modJsonFile);
 
         } catch (Exception e) {
             LOGGER.error("Error processing mod: {}", e.getMessage(), e);
@@ -142,10 +178,49 @@ public class ExtractJson {
     }
 
     private void updateModJson(JsonObject modJson, File modJsonFile, String targetVersion) throws IOException {
+        // Log before changes
+        LOGGER.info("Current JSON state before updates: {}", modJson.toString());
+        
         JsonObject depends = modJson.getAsJsonObject("depends");
         
-        // Update Minecraft version
-        depends.addProperty("minecraft", targetVersion);
+        // Update Minecraft version while preserving the format
+        if (depends.has("minecraft")) {
+            String currentVersion = depends.get("minecraft").getAsString();
+            LOGGER.info("Current minecraft version format: {}", currentVersion);
+            
+            // Handle version range format (e.g., ">=1.20 <=1.20.1")
+            if (currentVersion.contains(" ")) {
+                // Take the format from the second part (after space)
+                String[] parts = currentVersion.split("\\s+");
+                String versionPrefix = ">="; // Default prefix
+                
+                // Find the part with version comparison
+                for (String part : parts) {
+                    if (part.contains("<=")) {
+                        versionPrefix = "<=";
+                        break;
+                    } else if (part.contains(">=")) {
+                        versionPrefix = ">=";
+                        break;
+                    }
+                }
+                
+                // Update with preserved format
+                depends.addProperty("minecraft", versionPrefix + targetVersion);
+            } else {
+                // Preserve existing format (e.g., ">=1.21.3")
+                String versionPrefix = "";
+                if (currentVersion.startsWith(">=")) {
+                    versionPrefix = ">=";
+                } else if (currentVersion.startsWith("<=")) {
+                    versionPrefix = "<=";
+                }
+                depends.addProperty("minecraft", versionPrefix + targetVersion);
+            }
+        } else {
+            // If no existing version, use ">=" format
+            depends.addProperty("minecraft", ">=" + targetVersion);
+        }
         
         // Update Fabric dependencies
         String loaderVersion = FABRIC_LOADER_VERSIONS.get(targetVersion);
@@ -154,11 +229,15 @@ public class ExtractJson {
         if (loaderVersion != null) {
             depends.addProperty("fabricloader", loaderVersion);
         }
-        if (apiVersion != null) {
+        if (apiVersion != null && !depends.has("fabric-api")) {
             depends.addProperty("fabric-api", apiVersion);
         }
 
         LOGGER.info("Updated dependencies: {}", depends);
+        
+        // Log final state before saving
+        LOGGER.info("Final JSON state: {}", modJson.toString());
+        
         saveJsonFile(modJsonFile, modJson);
         logFileContent(modJsonFile);
     }
@@ -213,6 +292,35 @@ public class ExtractJson {
             reader.lines().forEach(LOGGER::info);
         } catch (IOException e) {
             LOGGER.error("Error reading file: {}", e.getMessage());
+        }
+    }
+
+    private void handleVersionChanges(String targetVersion) {
+        try {
+            if (versionHandler == null) {
+                LOGGER.error("MinecraftVersionHandler is not initialized");
+                return;
+            }
+
+            LOGGER.info("Processing version change from {} to {}", cleanVersion, targetVersion);
+            
+            // Extract clean version without prefixes
+            String sourceVersion = cleanVersion.replaceAll("[^0-9.]", "");
+            
+            // Call version handler methods
+            versionHandler.setCleanVersion(sourceVersion);
+            versionHandler.setMcVersion(targetVersion);
+            
+            try {
+                ComparisonResult result = versionHandler.compareMinecraftVersions(sourceVersion, targetVersion);
+                LOGGER.info("Version comparison result: {}", result);
+            } catch (Exception e) {
+                LOGGER.error("Error comparing versions: {}", e.getMessage(), e);
+            }
+            
+        } catch (Exception e) {
+            LOGGER.error("Error in version change processing: {}", e.getMessage(), e);
+            throw new IllegalStateException("Version change processing failed", e);
         }
     }
 
