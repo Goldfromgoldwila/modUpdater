@@ -1,7 +1,6 @@
 core\MinecraftVersionHandler$ComparisonException.class
 core\MinecraftVersionHandler$ComparisonResult.class
 core\MinecraftVersionHandler$ValidationException.class
-core\MinecraftVersionHandler$FileHashCache$CacheEntry.class
 core\MinecraftVersionHandler$FileCache$CacheEntry.class
 core\ModDecompilerService.class
 core\WebConfig.class
@@ -17,6 +16,7 @@ core\MinecraftVersionHandler$1.class
 core\MinecraftVersionHandler$DiffGenerator.class
 core\WebConfig$1.class
 core\ConvertController.class
+core\MinecraftVersionHandler$CacheEntry.class
 core\ExtractJson.class
 core\HealthController.class
 core\MinecraftVersionHandler$FileModification.class

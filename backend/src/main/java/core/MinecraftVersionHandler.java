@@ -764,34 +764,92 @@ public class MinecraftVersionHandler {
             this.unchangedFiles = count;
         }
 
+        private String formatDiff(String diff) {
+            if (diff == null || diff.isEmpty()) return "";
+            
+            StringBuilder formatted = new StringBuilder();
+            String[] lines = diff.split("\n");
+            
+            for (String line : lines) {
+                // Skip EQUAL lines unless they contain meaningful content
+                if (line.contains("[EQUAL,") && 
+                    (line.trim().endsWith(",") || line.trim().endsWith("]"))) {
+                    continue;
+                }
+                
+                // Format INSERT and DELETE lines
+                if (line.contains("[INSERT,")) {
+                    formatted.append("    + ").append(line.replaceAll("\\[INSERT,,\\+(.+)\\+\\]", "$1")).append("\n");
+                } else if (line.contains("[DELETE,")) {
+                    formatted.append("    - ").append(line.replaceAll("\\[DELETE,-(.+)-\\]", "$1")).append("\n");
+                }
+            }
+            
+            return formatted.toString();
+        }
+
+        private Map<String, List<String>> groupFilesByType(Set<String> files) {
+            Map<String, List<String>> grouped = new TreeMap<>();
+            
+            for (String file : files) {
+                String category = categorizeFile(file);
+                grouped.computeIfAbsent(category, k -> new ArrayList<>()).add(file);
+            }
+            
+            return grouped;
+        }
+
+        private String categorizeFile(String path) {
+            if (path.endsWith(".class")) {
+                if (path.startsWith("net/minecraft/")) {
+                    return "Minecraft Classes";
+                }
+                return "Other Classes";
+            }
+            if (path.startsWith("assets/minecraft/")) {
+                if (path.contains("/textures/")) return "Textures";
+                if (path.contains("/models/")) return "Models";
+                if (path.contains("/sounds/")) return "Sounds";
+                if (path.contains("/lang/")) return "Language Files";
+                return "Other Resources";
+            }
+            if (path.startsWith("data/minecraft/")) {
+                if (path.contains("/structures/")) return "Structures";
+                if (path.contains("/loot_tables/")) return "Loot Tables";
+                if (path.contains("/recipes/")) return "Recipes";
+                return "Data Files";
+            }
+            return "Other Files";
+        }
+
         @Override
         public String toString() {
             StringBuilder sb = new StringBuilder();
             sb.append("===== Comparison Results =====\n\n");
 
             // Summary
-            int totalChanges = added.size() + removed.size() + modifications.size();
-            sb.append(String.format("Total Changes: %d\n", totalChanges));
+            sb.append(String.format("Total Changes: %d\n", added.size() + removed.size() + modifications.size()));
             sb.append(String.format("Added Files: %d\n", added.size()));
             sb.append(String.format("Removed Files: %d\n", removed.size()));
             sb.append(String.format("Modified Files: %d\n\n", modifications.size()));
 
-            // Group files by type
-            Map<String, List<String>> addedByType = groupFilesByType(added);
-            Map<String, List<String>> removedByType = groupFilesByType(removed);
-            Map<String, List<Map.Entry<String, FileModification>>> modifiedByType = 
-                groupModificationsByType();
+            // Group files by category
+            Map<String, List<String>> addedByCategory = groupFilesByType(added);
+            Map<String, List<String>> removedByCategory = groupFilesByType(removed);
+            Map<String, List<Map.Entry<String, FileModification>>> modifiedByCategory = 
+                modifications.entrySet().stream()
+                    .collect(Collectors.groupingBy(
+                        e -> categorizeFile(e.getKey()),
+                        TreeMap::new,
+                        Collectors.toList()
+                    ));
 
             // Added Files
             if (!added.isEmpty()) {
                 sb.append("=== Added Files ===\n");
-                addedByType.forEach((type, files) -> {
-                    if (!files.isEmpty()) {
-                        sb.append(String.format("\n%s:\n", type));
-                        files.stream()
-                            .sorted()
-                            .forEach(file -> sb.append(String.format("  + %s\n", file)));
-                    }
+                addedByCategory.forEach((category, files) -> {
+                    sb.append(String.format("\n%s:\n", category));
+                    files.stream().sorted().forEach(f -> sb.append(String.format("  + %s\n", f)));
                 });
                 sb.append("\n");
             }
@@ -799,82 +857,34 @@ public class MinecraftVersionHandler {
             // Removed Files
             if (!removed.isEmpty()) {
                 sb.append("=== Removed Files ===\n");
-                removedByType.forEach((type, files) -> {
-                    if (!files.isEmpty()) {
-                        sb.append(String.format("\n%s:\n", type));
-                        files.stream()
-                            .sorted()
-                            .forEach(file -> sb.append(String.format("  - %s\n", file)));
-                    }
+                removedByCategory.forEach((category, files) -> {
+                    sb.append(String.format("\n%s:\n", category));
+                    files.stream().sorted().forEach(f -> sb.append(String.format("  - %s\n", f)));
                 });
                 sb.append("\n");
             }
 
-            // Modified Files with better formatting
+            // Modified Files
             if (!modifications.isEmpty()) {
                 sb.append("=== Modified Files ===\n");
-                modifiedByType.forEach((type, mods) -> {
-                    if (!mods.isEmpty()) {
-                        sb.append(String.format("\n%s:\n", type));
-                        mods.stream()
-                            .sorted(Map.Entry.comparingByKey())
-                            .forEach(entry -> {
-                                String file = entry.getKey();
-                                FileModification mod = entry.getValue();
-                                
-                                sb.append(String.format("  ~ %s\n", file));
-                                if (mod.getType().equals("CONTENT_CHANGED")) {
-                                    String[] lines = mod.getDetails().split("\n");
-                                    for (String line : lines) {
-                                        if (line.trim().startsWith("Size changed")) {
-                                            sb.append(String.format("    %s\n", line.trim()));
-                                        } else if (!line.trim().isEmpty()) {
-                                            sb.append(String.format("      %s\n", line.trim()));
-                                        }
-                                    }
-                                } else {
-                                    sb.append(String.format("    %s\n", mod.getDetails()));
-                                }
-                                sb.append("\n");
-                            });
-                    }
+                modifiedByCategory.forEach((category, mods) -> {
+                    sb.append(String.format("\n%s:\n", category));
+                    mods.stream()
+                        .sorted(Map.Entry.comparingByKey())
+                        .forEach(entry -> {
+                            String file = entry.getKey();
+                            FileModification mod = entry.getValue();
+                            sb.append(String.format("  ~ %s\n", file));
+                            sb.append(String.format("    Size: %s\n", mod.getDetails()));
+                            if (mod.getType().equals("CONTENT_CHANGED")) {
+                                sb.append(formatDiff(mod.getDetails()));
+                            }
+                            sb.append("\n");
+                        });
                 });
             }
 
             return sb.toString();
-        }
-
-        private Map<String, List<String>> groupFilesByType(Set<String> files) {
-            return files.stream()
-                .collect(Collectors.groupingBy(
-                    FileCategory::categorizeFile,
-                    TreeMap::new,
-                    Collectors.mapping(
-                        file -> file,
-                        Collectors.toList()
-                    )
-                ));
-        }
-
-        private Map<String, List<Map.Entry<String, FileModification>>> groupModificationsByType() {
-            return modifications.entrySet().stream()
-                .collect(Collectors.groupingBy(
-                    entry -> FileCategory.categorizeFile(entry.getKey()),
-                    TreeMap::new,
-                    Collectors.toList()
-                ));
-        }
-
-        private String getFileCategory(String path) {
-            if (path.endsWith(".class")) {
-                if (path.startsWith("net/minecraft/")) {
-                    return "Minecraft Classes";
-                }
-                return "Other Classes";
-            }
-            if (path.startsWith("assets/")) return "Resource Files";
-            if (path.endsWith(".json")) return "Configuration Files";
-            return "Other Files";
         }
 
         public void addAddedFile(String path) {
@@ -1119,64 +1129,16 @@ public class MinecraftVersionHandler {
     }
 
     @Component
-    public class FileHashCache {
-        private static final String CACHE_DIR = "cache";
-        private static final String CACHE_FILE = CACHE_DIR + "/file_hash_cache.dat";
+    public class FileHashCache implements Serializable {
+        private static final long serialVersionUID = 1L;
+        private static final String CACHE_FILE = "cache/file_hash_cache.dat";
         private final Map<String, CacheEntry> cache = new ConcurrentHashMap<>();
         private final Set<String> unchangedDirectories = ConcurrentHashMap.newKeySet();
-        
-        @Data
-        public class CacheEntry implements Serializable {
-            private static final long serialVersionUID = 1L;
-            private String hash;
-            private long lastModified;
-            private long fileSize;
-            private long lastChecked;
-            private int hitCount;
-            
-            public CacheEntry() {
-            }
-            
-            public CacheEntry(String hash, long lastModified, long fileSize, long lastChecked, int hitCount) {
-                this.hash = hash;
-                this.lastModified = lastModified;
-                this.fileSize = fileSize;
-                this.lastChecked = lastChecked;
-                this.hitCount = hitCount;
-            }
-            
-            // Getters and Setters
-            public String getHash() { return hash; }
-            public void setHash(String hash) { this.hash = hash; }
-            
-            public long getLastModified() { return lastModified; }
-            public void setLastModified(long lastModified) { this.lastModified = lastModified; }
-            
-            public long getFileSize() { return fileSize; }
-            public void setFileSize(long fileSize) { this.fileSize = fileSize; }
-            
-            public long getLastChecked() { return lastChecked; }
-            public void setLastChecked(long lastChecked) { this.lastChecked = lastChecked; }
-            
-            public int getHitCount() { return hitCount; }
-            public void setHitCount(int hitCount) { this.hitCount = hitCount; }
-            
-            public boolean isValid(Path path) {
-                try {
-                    BasicFileAttributes attrs = Files.readAttributes(path, BasicFileAttributes.class);
-                    return attrs.lastModifiedTime().toMillis() == lastModified 
-                        && attrs.size() == fileSize;
-                } catch (IOException e) {
-                    return false;
-                }
-            }
-        }
 
         @PostConstruct
         public void initialize() {
             try {
-                // Create cache directory if it doesn't exist
-                Path cacheDir = Paths.get(CACHE_DIR);
+                Path cacheDir = Paths.get("cache");
                 if (!Files.exists(cacheDir)) {
                     Files.createDirectories(cacheDir);
                 }
@@ -1184,73 +1146,6 @@ public class MinecraftVersionHandler {
             } catch (IOException e) {
                 LOGGER.error("Failed to initialize cache directory: {}", e.getMessage());
             }
-        }
-
-        public void saveCache() {
-            Path cacheFile = Paths.get(CACHE_FILE);
-            try {
-                // Ensure parent directory exists
-                Files.createDirectories(cacheFile.getParent());
-                
-                try (ObjectOutputStream oos = new ObjectOutputStream(
-                        new BufferedOutputStream(Files.newOutputStream(cacheFile, 
-                            StandardOpenOption.CREATE, 
-                            StandardOpenOption.TRUNCATE_EXISTING)))) {
-                    oos.writeObject(new HashMap<>(cache));
-                    LOGGER.info("Cache saved successfully to {}", cacheFile);
-                }
-            } catch (IOException e) {
-                LOGGER.error("Error saving cache: {}", e.getMessage(), e);
-            }
-        }
-
-        public Optional<String> getHash(Path path) {
-            String key = path.toString();
-            CacheEntry entry = cache.get(key);
-            
-            if (entry != null && entry.isValid(path)) {
-                entry.hitCount++;
-                return Optional.of(entry.hash);
-            }
-            
-            return Optional.empty();
-        }
-
-        public void putHash(Path path, String hash) {
-            try {
-                BasicFileAttributes attrs = Files.readAttributes(path, BasicFileAttributes.class);
-                CacheEntry entry = new CacheEntry(
-                    hash,
-                    attrs.lastModifiedTime().toMillis(),
-                    attrs.size(),
-                    System.currentTimeMillis(),
-                    0
-                );
-                cache.put(path.toString(), entry);
-            } catch (IOException e) {
-                LOGGER.error("Error caching hash for: {}", path, e);
-            }
-        }
-
-        public boolean isDirectoryUnchanged(Path dir) {
-            return unchangedDirectories.contains(dir.toString());
-        }
-
-        public void markDirectoryUnchanged(Path dir) {
-            unchangedDirectories.add(dir.toString());
-        }
-
-        private void cleanupCache() {
-            long now = System.currentTimeMillis();
-            long maxAge = TimeUnit.DAYS.toMillis(7); // Keep entries for 7 days
-            
-            cache.entrySet().removeIf(entry -> {
-                CacheEntry cacheEntry = entry.getValue();
-                // Remove if old and rarely used
-                return (now - cacheEntry.lastChecked > maxAge && cacheEntry.hitCount < 3);
-            });
-            
-            saveCache();
         }
 
         private void loadCache() {
@@ -1265,6 +1160,64 @@ public class MinecraftVersionHandler {
                     LOGGER.error("Error loading cache", e);
                 }
             }
+        }
+
+        public void saveCache() {
+            Path cacheFile = Paths.get(CACHE_FILE);
+            try {
+                Files.createDirectories(cacheFile.getParent());
+                try (ObjectOutputStream oos = new ObjectOutputStream(
+                        new BufferedOutputStream(Files.newOutputStream(cacheFile)))) {
+                    oos.writeObject(new HashMap<>(cache));
+                } catch (IOException e) {
+                    LOGGER.error("Error saving cache: {}", e.getMessage(), e);
+                }
+            } catch (IOException e) {
+                LOGGER.error("Error creating cache directory: {}", e.getMessage(), e);
+            }
+        }
+
+        public boolean isDirectoryUnchanged(Path dir) {
+            return unchangedDirectories.contains(dir.toString());
+        }
+
+        public Optional<String> getHash(Path path) {
+            String key = path.toString();
+            CacheEntry entry = cache.get(key);
+            if (entry != null && isValid(path, entry)) {
+                entry.setHitCount(entry.getHitCount() + 1);
+                return Optional.of(entry.getHash());
+            }
+            return Optional.empty();
+        }
+
+        private boolean isValid(Path path, CacheEntry entry) {
+            try {
+                BasicFileAttributes attrs = Files.readAttributes(path, BasicFileAttributes.class);
+                return attrs.lastModifiedTime().toMillis() == entry.getLastModified() 
+                    && attrs.size() == entry.getFileSize();
+            } catch (IOException e) {
+                return false;
+            }
+        }
+
+        public void putHash(Path path, String hash) {
+            try {
+                BasicFileAttributes attrs = Files.readAttributes(path, BasicFileAttributes.class);
+                CacheEntry entry = new CacheEntry();
+                entry.setHash(hash);
+                entry.setLastModified(attrs.lastModifiedTime().toMillis());
+                entry.setFileSize(attrs.size());
+                entry.setLastChecked(System.currentTimeMillis());
+                entry.setHitCount(0);
+                cache.put(path.toString(), entry);
+            } catch (IOException e) {
+                LOGGER.error("Error caching hash for: {}", path, e);
+            }
+        }
+
+        public void markDirectoryUnchanged(Path dir) {
+            unchangedDirectories.add(dir.toString());
         }
     }
 
@@ -1308,5 +1261,16 @@ public class MinecraftVersionHandler {
             default:
                 return "Unknown";
         }
+    }
+
+    // First define CacheEntry as a static class
+    @Data
+    public static class CacheEntry implements Serializable {
+        private static final long serialVersionUID = 1L;
+        private String hash;
+        private long lastModified;
+        private long fileSize;
+        private long lastChecked;
+        private int hitCount;
     }
 }
