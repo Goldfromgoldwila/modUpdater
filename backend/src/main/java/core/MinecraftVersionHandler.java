@@ -56,6 +56,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import java.nio.file.attribute.BasicFileAttributes;
 import lombok.Data;
+import javax.annotation.PostConstruct;
 
 @EnableScheduling
 @Component
@@ -768,19 +769,18 @@ public class MinecraftVersionHandler {
             StringBuilder sb = new StringBuilder();
             sb.append("===== Comparison Results =====\n\n");
 
-            // Summary with unchanged files
-            int totalFiles = added.size() + removed.size() + modifications.size() + unchangedFiles;
-            sb.append(String.format("Total Files Processed: %d\n", totalFiles));
-            sb.append(String.format("Unchanged Files: %d\n", unchangedFiles));
-            sb.append(String.format("Changed Files: %d\n", added.size() + removed.size() + modifications.size()));
-            sb.append(String.format("  - Added Files: %d\n", added.size()));
-            sb.append(String.format("  - Removed Files: %d\n", removed.size()));
-            sb.append(String.format("  - Modified Files: %d\n\n", modifications.size()));
+            // Summary
+            int totalChanges = added.size() + removed.size() + modifications.size();
+            sb.append(String.format("Total Changes: %d\n", totalChanges));
+            sb.append(String.format("Added Files: %d\n", added.size()));
+            sb.append(String.format("Removed Files: %d\n", removed.size()));
+            sb.append(String.format("Modified Files: %d\n\n", modifications.size()));
 
             // Group files by type
             Map<String, List<String>> addedByType = groupFilesByType(added);
             Map<String, List<String>> removedByType = groupFilesByType(removed);
-            Map<String, List<Entry<String, FileModification>>> modifiedByType = groupModificationsByType();
+            Map<String, List<Map.Entry<String, FileModification>>> modifiedByType = 
+                groupModificationsByType();
 
             // Added Files
             if (!added.isEmpty()) {
@@ -796,7 +796,7 @@ public class MinecraftVersionHandler {
                 sb.append("\n");
             }
 
-            // Removed Files - Ensure all removed files are shown
+            // Removed Files
             if (!removed.isEmpty()) {
                 sb.append("=== Removed Files ===\n");
                 removedByType.forEach((type, files) -> {
@@ -810,66 +810,44 @@ public class MinecraftVersionHandler {
                 sb.append("\n");
             }
 
-            // Modified Files with better diff formatting
+            // Modified Files with better formatting
             if (!modifications.isEmpty()) {
                 sb.append("=== Modified Files ===\n");
-                List<Map.Entry<String, FileModification>> sortedMods = 
-                    new ArrayList<>(modifications.entrySet());
-                Collections.sort(sortedMods, Map.Entry.comparingByKey());
-                
-                for (Map.Entry<String, FileModification> entry : sortedMods) {
-                    sb.append(String.format("\n  ~ %s\n", entry.getKey()));
-                    FileModification mod = entry.getValue();
-                    
-                    if (mod.getType().equals("CONTENT_CHANGED")) {
-                        sb.append("    Type: Content Changed\n");
-                        String[] lines = mod.getDetails().split("\n");
-                        for (String line : lines) {
-                            sb.append("    ").append(line).append("\n");
-                        }
-                    } else {
-                        sb.append(String.format("    Type: %s\n", mod.getType()));
-                        sb.append(String.format("    %s\n", mod.getDetails()));
+                modifiedByType.forEach((type, mods) -> {
+                    if (!mods.isEmpty()) {
+                        sb.append(String.format("\n%s:\n", type));
+                        mods.stream()
+                            .sorted(Map.Entry.comparingByKey())
+                            .forEach(entry -> {
+                                String file = entry.getKey();
+                                FileModification mod = entry.getValue();
+                                
+                                sb.append(String.format("  ~ %s\n", file));
+                                if (mod.getType().equals("CONTENT_CHANGED")) {
+                                    String[] lines = mod.getDetails().split("\n");
+                                    for (String line : lines) {
+                                        if (line.trim().startsWith("Size changed")) {
+                                            sb.append(String.format("    %s\n", line.trim()));
+                                        } else if (!line.trim().isEmpty()) {
+                                            sb.append(String.format("      %s\n", line.trim()));
+                                        }
+                                    }
+                                } else {
+                                    sb.append(String.format("    %s\n", mod.getDetails()));
+                                }
+                                sb.append("\n");
+                            });
                     }
-                }
+                });
             }
 
             return sb.toString();
-        }
-
-        private String truncateOutput(Set<String> files, int limit) {
-            StringBuilder sb = new StringBuilder();
-            int count = 0;
-            int total = files.size();
-            
-            List<String> sortedFiles = new ArrayList<>(files);
-            Collections.sort(sortedFiles);
-            
-            for (String file : sortedFiles) {
-                if (count < limit) {
-                    sb.append(String.format("  + %s\n", file));
-                }
-                count++;
-            }
-            
-            if (count > limit) {
-                sb.append(String.format("\n  ... and %d more files\n", total - limit));
-            }
-            
-            return sb.toString();
-        }
-
-        private String formatModification(FileModification mod) {
-            if (mod.getType().equals("SIZE_CHANGED")) {
-                return String.format("    Size changed: %s\n", mod.getDetails());
-            }
-            return String.format("    %s: %s\n", mod.getType(), mod.getDetails());
         }
 
         private Map<String, List<String>> groupFilesByType(Set<String> files) {
             return files.stream()
                 .collect(Collectors.groupingBy(
-                    this::getFileCategory,
+                    FileCategory::categorizeFile,
                     TreeMap::new,
                     Collectors.mapping(
                         file -> file,
@@ -878,10 +856,10 @@ public class MinecraftVersionHandler {
                 ));
         }
 
-        private Map<String, List<Entry<String, FileModification>>> groupModificationsByType() {
+        private Map<String, List<Map.Entry<String, FileModification>>> groupModificationsByType() {
             return modifications.entrySet().stream()
                 .collect(Collectors.groupingBy(
-                    entry -> getFileCategory(entry.getKey()),
+                    entry -> FileCategory.categorizeFile(entry.getKey()),
                     TreeMap::new,
                     Collectors.toList()
                 ));
@@ -1142,7 +1120,8 @@ public class MinecraftVersionHandler {
 
     @Component
     public class FileHashCache {
-        private static final String CACHE_FILE = "file_hash_cache.dat";
+        private static final String CACHE_DIR = "cache";
+        private static final String CACHE_FILE = CACHE_DIR + "/file_hash_cache.dat";
         private final Map<String, CacheEntry> cache = new ConcurrentHashMap<>();
         private final Set<String> unchangedDirectories = ConcurrentHashMap.newKeySet();
         
@@ -1193,14 +1172,36 @@ public class MinecraftVersionHandler {
             }
         }
 
+        @PostConstruct
         public void initialize() {
-            loadCache();
-            scheduleCleanup();
+            try {
+                // Create cache directory if it doesn't exist
+                Path cacheDir = Paths.get(CACHE_DIR);
+                if (!Files.exists(cacheDir)) {
+                    Files.createDirectories(cacheDir);
+                }
+                loadCache();
+            } catch (IOException e) {
+                LOGGER.error("Failed to initialize cache directory: {}", e.getMessage());
+            }
         }
 
-        @Scheduled(fixedRate = 24 * 60 * 60 * 1000) // Daily cleanup
-        public void scheduleCleanup() {
-            cleanupCache();
+        public void saveCache() {
+            Path cacheFile = Paths.get(CACHE_FILE);
+            try {
+                // Ensure parent directory exists
+                Files.createDirectories(cacheFile.getParent());
+                
+                try (ObjectOutputStream oos = new ObjectOutputStream(
+                        new BufferedOutputStream(Files.newOutputStream(cacheFile, 
+                            StandardOpenOption.CREATE, 
+                            StandardOpenOption.TRUNCATE_EXISTING)))) {
+                    oos.writeObject(new HashMap<>(cache));
+                    LOGGER.info("Cache saved successfully to {}", cacheFile);
+                }
+            } catch (IOException e) {
+                LOGGER.error("Error saving cache: {}", e.getMessage(), e);
+            }
         }
 
         public Optional<String> getHash(Path path) {
@@ -1265,16 +1266,6 @@ public class MinecraftVersionHandler {
                 }
             }
         }
-
-        private void saveCache() {
-            Path cacheFile = Paths.get(CACHE_FILE);
-            try (ObjectOutputStream oos = new ObjectOutputStream(
-                    new BufferedOutputStream(Files.newOutputStream(cacheFile)))) {
-                oos.writeObject(new HashMap<>(cache));
-            } catch (IOException e) {
-                LOGGER.error("Error saving cache", e);
-            }
-        }
     }
 
     private void compareFilesWithCache(
@@ -1302,5 +1293,20 @@ public class MinecraftVersionHandler {
         });
 
         newFileHashes.keySet().forEach(path -> result.addAddedFile(path));
+    }
+
+    private String getDeltaTypeDescription(DeltaType type) {
+        switch (type) {
+            case CHANGE:
+                return "Changed";
+            case DELETE:
+                return "Deleted";
+            case INSERT:
+                return "Added";
+            case EQUAL:
+                return "Unchanged";
+            default:
+                return "Unknown";
+        }
     }
 }
