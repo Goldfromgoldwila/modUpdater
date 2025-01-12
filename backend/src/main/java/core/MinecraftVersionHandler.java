@@ -52,7 +52,12 @@ import java.util.Map.Entry;
 import java.util.AbstractMap.SimpleEntry;
 import java.util.stream.Collectors;
 import java.util.TreeMap;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import java.nio.file.attribute.BasicFileAttributes;
+import lombok.Data;
 
+@EnableScheduling
 @Component
 @Validated
 @CacheConfig(cacheNames = {"versionComparisons"})
@@ -75,6 +80,9 @@ public class MinecraftVersionHandler {
 
     private String cleanVersion;
     private String mcVersion;
+
+    @Autowired
+    private FileHashCache fileHashCache;
 
     @Autowired
     public MinecraftVersionHandler(
@@ -215,84 +223,60 @@ public class MinecraftVersionHandler {
     private void performFullComparison(File oldVersionDir, File newVersionDir, ComparisonResult result) {
         LOGGER.info("Starting full comparison between versions");
         long startTime = System.currentTimeMillis();
-        
-        // Use ForkJoinPool for better parallel processing
-        ForkJoinPool customThreadPool = new ForkJoinPool(Runtime.getRuntime().availableProcessors() * 2);
+        AtomicInteger unchangedCount = new AtomicInteger(0);
         
         try {
-            // Create file lists with pre-calculated hashes
             Map<String, String> oldFileHashes = new ConcurrentHashMap<>();
             Map<String, String> newFileHashes = new ConcurrentHashMap<>();
             
-            // Collect files and calculate hashes in parallel
-            CompletableFuture<Void> oldFilesFuture = CompletableFuture.runAsync(() -> {
-                try {
-                    Files.walk(oldVersionDir.toPath())
-                        .parallel()
-                        .filter(Files::isRegularFile)
-                        .forEach(path -> {
-                            try {
-                                oldFileHashes.put(path.toString(), calculateQuickHash(path));
-                            } catch (IOException e) {
-                                LOGGER.error("Error hashing file: {}", path, e);
-                            }
-                        });
-                } catch (IOException e) {
-                    LOGGER.error("Error walking old directory", e);
-                }
-            }, customThreadPool);
+            // Process directories in parallel with caching
+            CompletableFuture.allOf(
+                CompletableFuture.runAsync(() -> processDirectoryWithCache(oldVersionDir, oldFileHashes)),
+                CompletableFuture.runAsync(() -> processDirectoryWithCache(newVersionDir, newFileHashes))
+            ).join();
 
-            CompletableFuture<Void> newFilesFuture = CompletableFuture.runAsync(() -> {
-                try {
-                    Files.walk(newVersionDir.toPath())
-                        .parallel()
-                        .filter(Files::isRegularFile)
-                        .forEach(path -> {
-                            try {
-                                newFileHashes.put(path.toString(), calculateQuickHash(path));
-                            } catch (IOException e) {
-                                LOGGER.error("Error hashing file: {}", path, e);
-                            }
-                        });
-                } catch (IOException e) {
-                    LOGGER.error("Error walking new directory", e);
-                }
-            }, customThreadPool);
-
-            // Wait for both operations to complete
-            CompletableFuture.allOf(oldFilesFuture, newFilesFuture).join();
-
-            // Compare files in parallel using the pre-calculated hashes
-            oldFileHashes.entrySet().parallelStream().forEach(entry -> {
-                String oldPathStr = entry.getKey();
-                Path oldPath = Paths.get(oldPathStr);
-                String oldHash = entry.getValue();
-                Path relativePath = oldVersionDir.toPath().relativize(oldPath);
-                Path newPath = newVersionDir.toPath().resolve(relativePath);
-
-                if (!Files.exists(newPath)) {
-                    result.addRemovedFile(relativePath.toString());
-                } else {
-                    String newHash = newFileHashes.get(newPath.toString());
-                    if (!oldHash.equals(newHash)) {
-                        compareFileDetails(oldPath, newPath, relativePath.toString(), result);
-                    }
-                }
-            });
-
-            // Find added files in parallel
-            newFileHashes.keySet().parallelStream()
-                .map(Paths::get)
-                .map(newPath -> newVersionDir.toPath().relativize(newPath))
-                .filter(relativePath -> !Files.exists(oldVersionDir.toPath().resolve(relativePath)))
-                .forEach(relativePath -> result.addAddedFile(relativePath.toString()));
-
+            // Compare files using cached hashes
+            compareFilesWithCache(oldVersionDir, newVersionDir, oldFileHashes, newFileHashes, result, unchangedCount);
+            
+            result.setUnchangedFiles(unchangedCount.get());
         } finally {
-            customThreadPool.shutdown();
+            fileHashCache.saveCache();
         }
+    }
 
-        long duration = System.currentTimeMillis() - startTime;
-        LOGGER.info("Comparison completed in {} ms", duration);
+    private void processDirectoryWithCache(File dir, Map<String, String> fileHashes) {
+        try {
+            Path basePath = dir.toPath();
+            if (fileHashCache.isDirectoryUnchanged(basePath)) {
+                LOGGER.info("Directory unchanged, using cached data: {}", basePath);
+                return;
+            }
+
+            Files.walk(basePath)
+                .parallel()
+                .filter(Files::isRegularFile)
+                .forEach(path -> {
+                    try {
+                        String relativePath = basePath.relativize(path).toString();
+                        String hash = fileHashCache.getHash(path)
+                            .orElseGet(() -> {
+                                try {
+                                    String newHash = calculateQuickHash(path);
+                                    fileHashCache.putHash(path, newHash);
+                                    return newHash;
+                                } catch (IOException e) {
+                                    LOGGER.error("Error calculating hash: {}", path, e);
+                                    return "";
+                                }
+                            });
+                        fileHashes.put(relativePath, hash);
+                    } catch (Exception e) {
+                        LOGGER.error("Error processing file: {}", path, e);
+                    }
+                });
+        } catch (IOException e) {
+            LOGGER.error("Error walking directory: {}", dir, e);
+        }
     }
 
     // Quick hash calculation using xxHash for better performance
@@ -317,24 +301,39 @@ public class MinecraftVersionHandler {
         try {
             long oldSize = Files.size(oldPath);
             long newSize = Files.size(newPath);
-            
-            if (oldSize != newSize) {
-                String details = String.format("Size changed from %d to %d bytes (difference: %d bytes)", 
-                    oldSize, newSize, (newSize - oldSize));
-                result.addModifiedFile(relativePath, "SIZE_CHANGED", details);
-                return;
-            }
+            String sizeChange = String.format("Size changed from %d to %d bytes (difference: %d bytes)", 
+                oldSize, newSize, newSize - oldSize);
 
-            // For text files, use efficient line comparison
+            // Generate diff for text files
             if (isTextFile(relativePath)) {
-                compareTextFiles(oldPath, newPath, relativePath, result);
+                try {
+                    String diff = diffGenerator.generateTextDiff(oldPath, newPath);
+                    result.addModifiedFile(relativePath, "CONTENT_CHANGED", 
+                        sizeChange + "\nDifferences:\n" + diff);
+                } catch (IOException e) {
+                    LOGGER.warn("Failed to generate diff for {}: {}", relativePath, e.getMessage());
+                    result.addModifiedFile(relativePath, "SIZE_CHANGED", sizeChange);
+                }
             } else {
-                // For binary files, use chunk comparison
-                compareBinaryFiles(oldPath, newPath, relativePath, result);
+                // For binary files, just show size change
+                result.addModifiedFile(relativePath, "SIZE_CHANGED", sizeChange);
             }
         } catch (IOException e) {
             LOGGER.error("Error comparing files: {} and {}", oldPath, newPath, e);
         }
+    }
+
+    private boolean isTextFile(String path) {
+        return path.endsWith(".java") || 
+               path.endsWith(".txt") || 
+               path.endsWith(".json") || 
+               path.endsWith(".xml") || 
+               path.endsWith(".yml") || 
+               path.endsWith(".properties") || 
+               path.endsWith(".mcmeta") || 
+               path.endsWith(".lang") || 
+               path.endsWith(".cfg") || 
+               path.endsWith(".toml");
     }
 
     private void compareBinaryFiles(Path oldPath, Path newPath, String relativePath, ComparisonResult result) throws IOException {
@@ -544,25 +543,6 @@ public class MinecraftVersionHandler {
         }
     }
 
-    private boolean isTextFile(String path) {
-        return path.endsWith(".java") || 
-               path.endsWith(".txt") || 
-               path.endsWith(".json") || 
-               path.endsWith(".yml") || 
-               path.endsWith(".properties") || 
-               path.endsWith(".mcmeta") || 
-               path.endsWith(".xml") || 
-               path.endsWith(".cfg") ||
-               path.endsWith(".JAVA") || 
-               path.endsWith(".TXT") || 
-               path.endsWith(".JSON") || 
-               path.endsWith(".YML") || 
-               path.endsWith(".PROPERTIES") || 
-               path.endsWith(".MCMETA") || 
-               path.endsWith(".XML") || 
-               path.endsWith(".CFG");
-    }
-
     @Cacheable(key = "'texture-' + #oldPath + '-' + #newPath")
     private double compareTextures(Path oldPath, Path newPath) throws IOException {
         BufferedImage oldImage = ImageIO.read(oldPath.toFile());
@@ -648,9 +628,10 @@ public class MinecraftVersionHandler {
             }
         }
         
-        private static class CacheEntry {
-            final String hash;
-            final long lastModified;
+        private static class CacheEntry implements Serializable {
+            private static final long serialVersionUID = 1L;
+            private String hash;
+            private long lastModified;
             
             CacheEntry(String hash, long lastModified) {
                 this.hash = hash;
@@ -760,8 +741,8 @@ public class MinecraftVersionHandler {
         private final Map<String, FileModification> modifications = new ConcurrentHashMap<>();
         private final Set<String> added = ConcurrentHashMap.newKeySet();
         private final Set<String> removed = ConcurrentHashMap.newKeySet();
+        private int unchangedFiles = 0;
 
-        // Add these getter methods
         public Set<String> getAddedFiles() {
             return Collections.unmodifiableSet(added);
         }
@@ -774,54 +755,62 @@ public class MinecraftVersionHandler {
             return Collections.unmodifiableMap(modifications);
         }
 
-        // Add these methods for modifying the collections
-        public void addAddedFile(String path) {
-            added.add(path);
-        }
-
-        public void addRemovedFile(String path) {
-            removed.add(path);
-        }
-
         public void addModifiedFile(String path, String type, String details) {
             modifications.put(path, new FileModification(type, details));
         }
 
-        // Fix the toString method
+        public void setUnchangedFiles(int count) {
+            this.unchangedFiles = count;
+        }
+
         @Override
         public String toString() {
             StringBuilder sb = new StringBuilder();
             sb.append("===== Comparison Results =====\n\n");
 
-            // Summary
-            sb.append(String.format("Total Changes: %d\n", added.size() + removed.size() + modifications.size()));
-            sb.append(String.format("Added Files: %d\n", added.size()));
-            sb.append(String.format("Removed Files: %d\n", removed.size()));
-            sb.append(String.format("Modified Files: %d\n\n", modifications.size()));
+            // Summary with unchanged files
+            int totalFiles = added.size() + removed.size() + modifications.size() + unchangedFiles;
+            sb.append(String.format("Total Files Processed: %d\n", totalFiles));
+            sb.append(String.format("Unchanged Files: %d\n", unchangedFiles));
+            sb.append(String.format("Changed Files: %d\n", added.size() + removed.size() + modifications.size()));
+            sb.append(String.format("  - Added Files: %d\n", added.size()));
+            sb.append(String.format("  - Removed Files: %d\n", removed.size()));
+            sb.append(String.format("  - Modified Files: %d\n\n", modifications.size()));
+
+            // Group files by type
+            Map<String, List<String>> addedByType = groupFilesByType(added);
+            Map<String, List<String>> removedByType = groupFilesByType(removed);
+            Map<String, List<Entry<String, FileModification>>> modifiedByType = groupModificationsByType();
 
             // Added Files
             if (!added.isEmpty()) {
                 sb.append("=== Added Files ===\n");
-                List<String> sortedAdded = new ArrayList<>(added);
-                Collections.sort(sortedAdded);
-                for (String file : sortedAdded) {
-                    sb.append(String.format("  + %s\n", file));
-                }
+                addedByType.forEach((type, files) -> {
+                    if (!files.isEmpty()) {
+                        sb.append(String.format("\n%s:\n", type));
+                        files.stream()
+                            .sorted()
+                            .forEach(file -> sb.append(String.format("  + %s\n", file)));
+                    }
+                });
                 sb.append("\n");
             }
 
-            // Removed Files
+            // Removed Files - Ensure all removed files are shown
             if (!removed.isEmpty()) {
                 sb.append("=== Removed Files ===\n");
-                List<String> sortedRemoved = new ArrayList<>(removed);
-                Collections.sort(sortedRemoved);
-                for (String file : sortedRemoved) {
-                    sb.append(String.format("  - %s\n", file));
-                }
+                removedByType.forEach((type, files) -> {
+                    if (!files.isEmpty()) {
+                        sb.append(String.format("\n%s:\n", type));
+                        files.stream()
+                            .sorted()
+                            .forEach(file -> sb.append(String.format("  - %s\n", file)));
+                    }
+                });
                 sb.append("\n");
             }
 
-            // Modified Files
+            // Modified Files with better diff formatting
             if (!modifications.isEmpty()) {
                 sb.append("=== Modified Files ===\n");
                 List<Map.Entry<String, FileModification>> sortedMods = 
@@ -829,17 +818,25 @@ public class MinecraftVersionHandler {
                 Collections.sort(sortedMods, Map.Entry.comparingByKey());
                 
                 for (Map.Entry<String, FileModification> entry : sortedMods) {
-                    sb.append(String.format("  ~ %s\n", entry.getKey()));
+                    sb.append(String.format("\n  ~ %s\n", entry.getKey()));
                     FileModification mod = entry.getValue();
-                    sb.append(String.format("    Type: %s\n", mod.getType()));
-                    sb.append(String.format("    %s\n\n", mod.getDetails()));
+                    
+                    if (mod.getType().equals("CONTENT_CHANGED")) {
+                        sb.append("    Type: Content Changed\n");
+                        String[] lines = mod.getDetails().split("\n");
+                        for (String line : lines) {
+                            sb.append("    ").append(line).append("\n");
+                        }
+                    } else {
+                        sb.append(String.format("    Type: %s\n", mod.getType()));
+                        sb.append(String.format("    %s\n", mod.getDetails()));
+                    }
                 }
             }
 
             return sb.toString();
         }
 
-        // Add this method to limit output size if needed
         private String truncateOutput(Set<String> files, int limit) {
             StringBuilder sb = new StringBuilder();
             int count = 0;
@@ -862,16 +859,57 @@ public class MinecraftVersionHandler {
             return sb.toString();
         }
 
-        // Add this method to format file modifications
         private String formatModification(FileModification mod) {
             if (mod.getType().equals("SIZE_CHANGED")) {
                 return String.format("    Size changed: %s\n", mod.getDetails());
             }
             return String.format("    %s: %s\n", mod.getType(), mod.getDetails());
         }
+
+        private Map<String, List<String>> groupFilesByType(Set<String> files) {
+            return files.stream()
+                .collect(Collectors.groupingBy(
+                    this::getFileCategory,
+                    TreeMap::new,
+                    Collectors.mapping(
+                        file -> file,
+                        Collectors.toList()
+                    )
+                ));
+        }
+
+        private Map<String, List<Entry<String, FileModification>>> groupModificationsByType() {
+            return modifications.entrySet().stream()
+                .collect(Collectors.groupingBy(
+                    entry -> getFileCategory(entry.getKey()),
+                    TreeMap::new,
+                    Collectors.toList()
+                ));
+        }
+
+        private String getFileCategory(String path) {
+            if (path.endsWith(".class")) {
+                if (path.startsWith("net/minecraft/")) {
+                    return "Minecraft Classes";
+                }
+                return "Other Classes";
+            }
+            if (path.startsWith("assets/")) return "Resource Files";
+            if (path.endsWith(".json")) return "Configuration Files";
+            return "Other Files";
+        }
+
+        public void addAddedFile(String path) {
+            added.add(path);
+        }
+
+        public void addRemovedFile(String path) {
+            removed.add(path);
+        }
     }
 
-    public static class FileModification {
+    public static class FileModification implements Serializable {
+        private static final long serialVersionUID = 1L;
         private final String type;
         private final String details;
         
@@ -1047,5 +1085,222 @@ public class MinecraftVersionHandler {
         if (oldSize == newSize) return "Content changed";
         else if (oldSize < newSize) return "Size increased";
         else return "Size decreased";
+    }
+
+    public static class FileCategory {
+        private static final Map<String, String> CATEGORY_PATTERNS = new HashMap<>();
+        static {
+            CATEGORY_PATTERNS.put("net/minecraft/client/", "Client Classes");
+            CATEGORY_PATTERNS.put("net/minecraft/server/", "Server Classes");
+            CATEGORY_PATTERNS.put("net/minecraft/world/", "World Classes");
+            CATEGORY_PATTERNS.put("assets/minecraft/textures/", "Textures");
+            CATEGORY_PATTERNS.put("assets/minecraft/models/", "Models");
+            CATEGORY_PATTERNS.put("assets/minecraft/sounds/", "Sounds");
+            CATEGORY_PATTERNS.put("assets/minecraft/blockstates/", "Blockstates");
+            CATEGORY_PATTERNS.put("assets/minecraft/lang/", "Languages");
+            CATEGORY_PATTERNS.put("assets/minecraft/shaders/", "Shaders");
+            CATEGORY_PATTERNS.put("data/minecraft/loot_tables/", "Loot Tables");
+            CATEGORY_PATTERNS.put("data/minecraft/recipes/", "Recipes");
+            CATEGORY_PATTERNS.put("data/minecraft/advancements/", "Advancements");
+            CATEGORY_PATTERNS.put("data/minecraft/tags/", "Tags");
+        }
+
+        public static String categorizeFile(String path) {
+            // Check for specific file types first
+            if (path.endsWith(".class")) {
+                if (path.contains("net/minecraft/")) {
+                    return findDetailedCategory(path);
+                }
+                return "Other Classes";
+            }
+            
+            // Check for resource types
+            for (Map.Entry<String, String> category : CATEGORY_PATTERNS.entrySet()) {
+                if (path.startsWith(category.getKey())) {
+                    return category.getValue();
+                }
+            }
+            
+            // Check file extensions
+            if (path.endsWith(".json")) return "Configuration Files";
+            if (path.endsWith(".png")) return "Textures";
+            if (path.endsWith(".ogg")) return "Sounds";
+            if (path.endsWith(".mcmeta")) return "Metadata";
+            
+            return "Other Files";
+        }
+
+        private static String findDetailedCategory(String path) {
+            for (Map.Entry<String, String> category : CATEGORY_PATTERNS.entrySet()) {
+                if (path.contains(category.getKey())) {
+                    return category.getValue();
+                }
+            }
+            return "Minecraft Classes";
+        }
+    }
+
+    @Component
+    public class FileHashCache {
+        private static final String CACHE_FILE = "file_hash_cache.dat";
+        private final Map<String, CacheEntry> cache = new ConcurrentHashMap<>();
+        private final Set<String> unchangedDirectories = ConcurrentHashMap.newKeySet();
+        
+        @Data
+        public class CacheEntry implements Serializable {
+            private static final long serialVersionUID = 1L;
+            private String hash;
+            private long lastModified;
+            private long fileSize;
+            private long lastChecked;
+            private int hitCount;
+            
+            public CacheEntry() {
+            }
+            
+            public CacheEntry(String hash, long lastModified, long fileSize, long lastChecked, int hitCount) {
+                this.hash = hash;
+                this.lastModified = lastModified;
+                this.fileSize = fileSize;
+                this.lastChecked = lastChecked;
+                this.hitCount = hitCount;
+            }
+            
+            // Getters and Setters
+            public String getHash() { return hash; }
+            public void setHash(String hash) { this.hash = hash; }
+            
+            public long getLastModified() { return lastModified; }
+            public void setLastModified(long lastModified) { this.lastModified = lastModified; }
+            
+            public long getFileSize() { return fileSize; }
+            public void setFileSize(long fileSize) { this.fileSize = fileSize; }
+            
+            public long getLastChecked() { return lastChecked; }
+            public void setLastChecked(long lastChecked) { this.lastChecked = lastChecked; }
+            
+            public int getHitCount() { return hitCount; }
+            public void setHitCount(int hitCount) { this.hitCount = hitCount; }
+            
+            public boolean isValid(Path path) {
+                try {
+                    BasicFileAttributes attrs = Files.readAttributes(path, BasicFileAttributes.class);
+                    return attrs.lastModifiedTime().toMillis() == lastModified 
+                        && attrs.size() == fileSize;
+                } catch (IOException e) {
+                    return false;
+                }
+            }
+        }
+
+        public void initialize() {
+            loadCache();
+            scheduleCleanup();
+        }
+
+        @Scheduled(fixedRate = 24 * 60 * 60 * 1000) // Daily cleanup
+        public void scheduleCleanup() {
+            cleanupCache();
+        }
+
+        public Optional<String> getHash(Path path) {
+            String key = path.toString();
+            CacheEntry entry = cache.get(key);
+            
+            if (entry != null && entry.isValid(path)) {
+                entry.hitCount++;
+                return Optional.of(entry.hash);
+            }
+            
+            return Optional.empty();
+        }
+
+        public void putHash(Path path, String hash) {
+            try {
+                BasicFileAttributes attrs = Files.readAttributes(path, BasicFileAttributes.class);
+                CacheEntry entry = new CacheEntry(
+                    hash,
+                    attrs.lastModifiedTime().toMillis(),
+                    attrs.size(),
+                    System.currentTimeMillis(),
+                    0
+                );
+                cache.put(path.toString(), entry);
+            } catch (IOException e) {
+                LOGGER.error("Error caching hash for: {}", path, e);
+            }
+        }
+
+        public boolean isDirectoryUnchanged(Path dir) {
+            return unchangedDirectories.contains(dir.toString());
+        }
+
+        public void markDirectoryUnchanged(Path dir) {
+            unchangedDirectories.add(dir.toString());
+        }
+
+        private void cleanupCache() {
+            long now = System.currentTimeMillis();
+            long maxAge = TimeUnit.DAYS.toMillis(7); // Keep entries for 7 days
+            
+            cache.entrySet().removeIf(entry -> {
+                CacheEntry cacheEntry = entry.getValue();
+                // Remove if old and rarely used
+                return (now - cacheEntry.lastChecked > maxAge && cacheEntry.hitCount < 3);
+            });
+            
+            saveCache();
+        }
+
+        private void loadCache() {
+            Path cacheFile = Paths.get(CACHE_FILE);
+            if (Files.exists(cacheFile)) {
+                try (ObjectInputStream ois = new ObjectInputStream(
+                        new BufferedInputStream(Files.newInputStream(cacheFile)))) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, CacheEntry> loaded = (Map<String, CacheEntry>) ois.readObject();
+                    cache.putAll(loaded);
+                } catch (Exception e) {
+                    LOGGER.error("Error loading cache", e);
+                }
+            }
+        }
+
+        private void saveCache() {
+            Path cacheFile = Paths.get(CACHE_FILE);
+            try (ObjectOutputStream oos = new ObjectOutputStream(
+                    new BufferedOutputStream(Files.newOutputStream(cacheFile)))) {
+                oos.writeObject(new HashMap<>(cache));
+            } catch (IOException e) {
+                LOGGER.error("Error saving cache", e);
+            }
+        }
+    }
+
+    private void compareFilesWithCache(
+            File oldVersionDir, 
+            File newVersionDir, 
+            Map<String, String> oldFileHashes, 
+            Map<String, String> newFileHashes, 
+            ComparisonResult result, 
+            AtomicInteger unchangedCount) {
+        
+        oldFileHashes.entrySet().parallelStream().forEach(entry -> {
+            String relativePath = entry.getKey();
+            String oldHash = entry.getValue();
+            String newHash = newFileHashes.remove(relativePath);
+
+            if (newHash == null) {
+                result.addRemovedFile(relativePath);
+            } else if (!oldHash.equals(newHash)) {
+                Path oldPath = oldVersionDir.toPath().resolve(relativePath);
+                Path newPath = newVersionDir.toPath().resolve(relativePath);
+                compareFileDetails(oldPath, newPath, relativePath, result);
+            } else {
+                unchangedCount.incrementAndGet();
+            }
+        });
+
+        newFileHashes.keySet().forEach(path -> result.addAddedFile(path));
     }
 }
