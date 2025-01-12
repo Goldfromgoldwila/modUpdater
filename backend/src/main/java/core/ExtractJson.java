@@ -66,9 +66,10 @@ public class ExtractJson {
                 throw new IllegalStateException("Mod JSON file not found after waiting");
             }
 
-            // Log original file content
-            LOGGER.info("Original mod JSON content:");
+            // Log original file content with clear separator
+            LOGGER.info("========== ORIGINAL MOD JSON CONTENT ==========");
             logFileContent(modJsonFile);
+            LOGGER.info("=============================================");
 
             // First read the JSON to get current version
             JsonObject modJson = readJsonFile(modJsonFile);
@@ -80,6 +81,14 @@ public class ExtractJson {
                 currentVersion = depends.get("minecraft").getAsString();
                 this.cleanVersion = processMinecraftVersion(currentVersion);
                 logCurrentVersion(currentVersion, cleanVersion);
+                
+                // Trigger code analysis
+                if (versionHandler != null) {
+                    LOGGER.info("Triggering code analysis");
+                    versionHandler.analyzeCodeChanges(cleanVersion, targetVersion);
+                } else {
+                    LOGGER.warn("VersionHandler is null, skipping code analysis");
+                }
             }
 
             // Call MinecraftVersionHandler first for validation
@@ -100,9 +109,10 @@ public class ExtractJson {
             // Only proceed with updates if version check passes
             updateModJson(modJson, modJsonFile, targetVersion);
 
-            // Log modified file content
-            LOGGER.info("Modified mod JSON content:");
+            // Log modified file content with clear separator
+            LOGGER.info("========== UPDATED MOD JSON CONTENT ==========");
             logFileContent(modJsonFile);
+            LOGGER.info("=============================================");
 
         } catch (Exception e) {
             LOGGER.error("Error processing mod: {}", e.getMessage(), e);
@@ -300,13 +310,28 @@ public class ExtractJson {
     }
 
     private void logCurrentVersion(String currentVersion, String cleanVersion) {
-        LOGGER.info("Found minecraft version in depends: {}", currentVersion);
-        LOGGER.info("Cleaned version for comparison: {}", cleanVersion);
+        LOGGER.info("\nVersion Information:");
+        LOGGER.info("  Original Version: {}", currentVersion);
+        LOGGER.info("  Cleaned Version: {}", cleanVersion);
+        LOGGER.info("");
     }
 
     private void logFileContent(File file) {
-        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
-            reader.lines().forEach(LOGGER::info);
+        try {
+            String content = Files.readString(file.toPath());
+            // Pretty print the JSON for better readability
+            JsonObject json = JsonParser.parseString(content).getAsJsonObject();
+            String prettyJson = new GsonBuilder()
+                .setPrettyPrinting()
+                .disableHtmlEscaping() // Prevent escaping of special characters
+                .create()
+                .toJson(json);
+            
+            // Split and log each line for better readability
+            String[] lines = prettyJson.split("\n");
+            for (String line : lines) {
+                LOGGER.info("{}", line);
+            }
         } catch (IOException e) {
             LOGGER.error("Error reading file: {}", e.getMessage());
         }

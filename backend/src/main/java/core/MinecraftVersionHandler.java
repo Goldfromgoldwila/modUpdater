@@ -86,6 +86,9 @@ public class MinecraftVersionHandler {
     private FileHashCache fileHashCache;
 
     @Autowired
+    private CodeComparisonService codeComparisonService;
+
+    @Autowired
     public MinecraftVersionHandler(
             FileCache fileCache,
             ValidationService validationService,
@@ -156,6 +159,15 @@ public class MinecraftVersionHandler {
                 result.getRemovedFiles().isEmpty() && 
                 result.getModifications().isEmpty()) {
                 LOGGER.warn("Warning: Comparison result is empty. This might indicate a problem.");
+            }
+            
+            // Add code analysis
+            Path oldDecompPath = oldVersionDir.toPath().resolve("src");
+            Path newDecompPath = newVersionDir.toPath().resolve("src");
+            
+            if (Files.exists(oldDecompPath) && Files.exists(newDecompPath)) {
+                LOGGER.info("Analyzing code changes between versions");
+                codeComparisonService.compareVersions(oldDecompPath, newDecompPath);
             }
             
             return result;
@@ -1283,5 +1295,37 @@ public class MinecraftVersionHandler {
         private long fileSize;
         private long lastChecked;
         private int hitCount;
+    }
+
+    // Add a method to explicitly trigger code analysis
+    public void analyzeCodeChanges(String sourceVersion, String targetVersion) {
+        LOGGER.info("\nStarting code analysis between versions {} and {}", sourceVersion, targetVersion);
+        
+        try {
+            File oldVersionDir = findAndValidateDirectory(sourceVersion);
+            File newVersionDir = findAndValidateDirectory(targetVersion);
+            
+            if (oldVersionDir == null || newVersionDir == null) {
+                LOGGER.error("Could not find one or both version directories");
+                return;
+            }
+            
+            Path oldDecompPath = oldVersionDir.toPath().resolve("src");
+            Path newDecompPath = newVersionDir.toPath().resolve("src");
+            
+            if (!Files.exists(oldDecompPath) || !Files.exists(newDecompPath)) {
+                LOGGER.error("Source directories not found:");
+                LOGGER.error("  Old: {} (exists: {})", oldDecompPath, Files.exists(oldDecompPath));
+                LOGGER.error("  New: {} (exists: {})", newDecompPath, Files.exists(newDecompPath));
+                return;
+            }
+
+            LOGGER.info("Found source directories, starting code analysis");
+            codeComparisonService.compareVersions(oldDecompPath, newDecompPath);
+            
+        } catch (Exception e) {
+            LOGGER.error("Error during code analysis: {}", e.getMessage(), e);
+            LOGGER.error("Stack trace:", e);
+        }
     }
 }

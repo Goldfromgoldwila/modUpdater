@@ -1,9 +1,12 @@
+core\CodeAnalyzer.class
 core\MinecraftVersionHandler$ComparisonException.class
 core\MinecraftVersionHandler$ComparisonResult.class
 core\MinecraftVersionHandler$ValidationException.class
+core\CodeAnalyzer$ClassInfo.class
 core\MinecraftVersionHandler$FileCache$CacheEntry.class
 core\ModDecompilerService.class
 core\WebConfig.class
+core\CodeComparisonService.class
 core\ExtractJson$VersionCompatibility.class
 core\Main.class
 core\MinecraftVersionHandler$FileComparison.class
@@ -23,4 +26,5 @@ core\HealthController.class
 core\MinecraftVersionHandler$FileModification.class
 core\MinecraftVersionHandler$ComparisonState.class
 core\UploadController.class
+core\CodeAnalyzer$MethodSignature.class
 core\MinecraftVersionHandler$FileCache.class
