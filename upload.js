@@ -161,4 +161,17 @@ document.addEventListener('DOMContentLoaded', function() {
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
+
+
+    async function fetchLogs() {
+        const response = await fetch('http://localhost:8080/api/logs/version-comparison');
+        const data = await response.json();
+        if (data.success) {
+            console.log('Logs:', data.logs);
+            console.log('Diff Report:', data.diffReport);
+        }
+    }
+    
+    // For real-time updates
+    setInterval(fetchLogs, 5000); // Poll every 5 seconds
 });

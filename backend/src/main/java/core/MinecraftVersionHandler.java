@@ -134,15 +134,51 @@ public class MinecraftVersionHandler {
     }
 
     private void generateComparisonReport(Map<String, List<String>> changes) {
-        LOGGER.info("\n=== Comparison Report ===");
-        LOGGER.info("Added files ({}): ", changes.get("added").size());
-        changes.get("added").forEach(file -> LOGGER.info("  + {}", file));
-        
-        LOGGER.info("\nModified files ({}): ", changes.get("modified").size());
-        changes.get("modified").forEach(file -> LOGGER.info("  * {}", file));
-        
-        LOGGER.info("\nDeleted files ({}): ", changes.get("deleted").size());
-        changes.get("deleted").forEach(file -> LOGGER.info("  - {}", file));
+        int addedCount = changes.get("added").size();
+        int modifiedCount = changes.get("modified").size();
+        int deletedCount = changes.get("deleted").size();
+        int totalChanges = addedCount + modifiedCount + deletedCount;
+
+        LOGGER.info("\n=== Comparison Report Summary ===");
+        LOGGER.info("Total changes: {} files", totalChanges);
+        LOGGER.info("  Added:    {} files", addedCount);
+        LOGGER.info("  Modified: {} files", modifiedCount);
+        LOGGER.info("  Deleted:  {} files", deletedCount);
+        LOGGER.info("\n=== Detailed Changes ===");
+
+        // Write detailed changes to a file
+        Path reportPath = Paths.get(DIFF_OUTPUT_DIR, String.format("diff_report_%s_to_%s.txt", cleanVersion, mcVersion));
+        try (BufferedWriter writer = Files.newBufferedWriter(reportPath)) {
+            // Write summary
+            writer.write(String.format("Comparison between %s and %s\n", cleanVersion, mcVersion));
+            writer.write(String.format("Total changes: %d files\n", totalChanges));
+            writer.write(String.format("Added: %d, Modified: %d, Deleted: %d\n\n", addedCount, modifiedCount, deletedCount));
+
+            // Write added files
+            writer.write(String.format("\nAdded files (%d):\n", addedCount));
+            for (String file : changes.get("added")) {
+                writer.write("  + " + file + "\n");
+                LOGGER.info("  + {}", file);
+            }
+
+            // Write modified files
+            writer.write(String.format("\nModified files (%d):\n", modifiedCount));
+            for (String file : changes.get("modified")) {
+                writer.write("  * " + file + "\n");
+                LOGGER.info("  * {}", file);
+            }
+
+            // Write deleted files
+            writer.write(String.format("\nDeleted files (%d):\n", deletedCount));
+            for (String file : changes.get("deleted")) {
+                writer.write("  - " + file + "\n");
+                LOGGER.info("  - {}", file);
+            }
+
+            LOGGER.info("\nDetailed report written to: {}", reportPath);
+        } catch (IOException e) {
+            LOGGER.error("Error writing comparison report: {}", e.getMessage());
+        }
     }
 
     private boolean isMeldAvailable() {
@@ -218,5 +254,44 @@ public class MinecraftVersionHandler {
 
     public String getMcVersion() {
         return mcVersion;
+    }
+
+    // Add this method to configure logging
+    private void configureLogging() {
+        // Get the root logger
+        ch.qos.logback.classic.Logger rootLogger = 
+            (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME);
+
+        // Create a rolling file appender
+        ch.qos.logback.core.rolling.RollingFileAppender<ch.qos.logback.classic.spi.ILoggingEvent> fileAppender = 
+            new ch.qos.logback.core.rolling.RollingFileAppender<>();
+
+        // Set rolling policy
+        ch.qos.logback.core.rolling.TimeBasedRollingPolicy<?> rollingPolicy = 
+            new ch.qos.logback.core.rolling.TimeBasedRollingPolicy<>();
+        rollingPolicy.setFileNamePattern("logs/minecraft-mod-updater.%d{yyyy-MM-dd}.log");
+        rollingPolicy.setMaxHistory(7); // Keep 7 days of logs
+        rollingPolicy.setParent(fileAppender);
+        fileAppender.setRollingPolicy(rollingPolicy);
+
+        // Set encoder
+        ch.qos.logback.classic.encoder.PatternLayoutEncoder encoder = 
+            new ch.qos.logback.classic.encoder.PatternLayoutEncoder();
+        encoder.setPattern("%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n");
+        encoder.setContext(rootLogger.getLoggerContext());
+        encoder.start();
+        fileAppender.setEncoder(encoder);
+
+        // Start appender
+        fileAppender.setContext(rootLogger.getLoggerContext());
+        fileAppender.start();
+
+        // Add appender to root logger
+        rootLogger.addAppender(fileAppender);
+    }
+
+    // Call this in constructor
+    public MinecraftVersionHandler() {
+        configureLogging();
     }
 }

@@ -1,56 +1,74 @@
 package core;
 
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.ResponseEntity;
-
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.List;
-import java.util.Map;
-import java.util.HashMap;
+import java.nio.file.*;
+import java.util.*;
+import java.io.*;
 
 @RestController
 @RequestMapping("/api/logs")
+@CrossOrigin(origins = "*")
 public class LogController {
     private static final Logger LOGGER = LoggerFactory.getLogger(LogController.class);
     private static final String LOG_DIR = "logs";
-    private static final String APP_LOG = "application.log";
+    private static final String DIFF_DIR = "diff_results";
 
-    @GetMapping
-    public ResponseEntity<Map<String, List<String>>> getLogs() {
-        Map<String, List<String>> allLogs = new HashMap<>();
-
+    @GetMapping("/version-comparison")
+    public Map<String, Object> getVersionComparisonLogs() {
+        Map<String, Object> response = new HashMap<>();
         try {
-            // Ensure the logs directory exists
-            Path logDirPath = Paths.get(LOG_DIR);
-            if (!Files.exists(logDirPath)) {
-                Files.createDirectories(logDirPath);
-                LOGGER.warn("Log directory '{}' did not exist and was created.", LOG_DIR);
+            // Get the latest log file
+            File logFile = getLatestFile(LOG_DIR, "minecraft-mod-updater");
+            if (logFile != null) {
+                List<String> logs = Files.readAllLines(logFile.toPath());
+                response.put("logs", logs);
             }
 
-            // Read application logs
-            Path appLogPath = logDirPath.resolve(APP_LOG);
-            if (Files.exists(appLogPath)) {
-                List<String> logEntries = Files.readAllLines(appLogPath);
-                allLogs.put("application", logEntries);
-                LOGGER.info("Successfully retrieved {} log entries from '{}'.", logEntries.size(), appLogPath);
-            } else {
-                LOGGER.warn("Log file '{}' not found.", appLogPath);
-                allLogs.put("application", List.of("No logs found."));
+            // Get the latest diff report
+            File diffReport = getLatestFile(DIFF_DIR, "diff_report");
+            if (diffReport != null) {
+                List<String> diffContent = Files.readAllLines(diffReport.toPath());
+                response.put("diffReport", diffContent);
             }
 
-        } catch (IOException e) {
-            LOGGER.error("Error reading logs: {}", e.getMessage(), e);
-            return ResponseEntity.internalServerError()
-                .body(Map.of("error", List.of("Failed to retrieve logs: " + e.getMessage())));
+            response.put("success", true);
+        } catch (Exception e) {
+            LOGGER.error("Error reading logs: {}", e.getMessage());
+            response.put("success", false);
+            response.put("error", e.getMessage());
         }
+        return response;
+    }
 
-        return ResponseEntity.ok(allLogs);
+    private File getLatestFile(String directory, String prefix) {
+        File dir = new File(directory);
+        if (!dir.exists()) return null;
+
+        File[] files = dir.listFiles((d, name) -> name.startsWith(prefix));
+        if (files == null || files.length == 0) return null;
+
+        return Arrays.stream(files)
+                .max(Comparator.comparingLong(File::lastModified))
+                .orElse(null);
+    }
+
+    @GetMapping("/stream")
+    public List<String> getLatestLogs(@RequestParam(defaultValue = "100") int lines) {
+        try {
+            File logFile = getLatestFile(LOG_DIR, "minecraft-mod-updater");
+            if (logFile == null) {
+                return Collections.emptyList();
+            }
+
+            List<String> allLines = Files.readAllLines(logFile.toPath());
+            int startIndex = Math.max(0, allLines.size() - lines);
+            return allLines.subList(startIndex, allLines.size());
+        } catch (Exception e) {
+            LOGGER.error("Error streaming logs: {}", e.getMessage());
+            return Collections.emptyList();
+        }
     }
 }

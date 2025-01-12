@@ -1,0 +1,7 @@
+.git
+.gitignore
+README.md
+*.md
+*.log
+target/*
+!target/minecraft-mod-updater-1.0-SNAPSHOT.jar
