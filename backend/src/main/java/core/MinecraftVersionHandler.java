@@ -11,7 +11,7 @@ import java.nio.file.*;
 public class MinecraftVersionHandler {
     private static final Logger LOGGER = LoggerFactory.getLogger(MinecraftVersionHandler.class);
     private static final String DECOMPILED_DIR = "versions";
-    private static final String WINMERGE_PATH = "winmerge/WinMergeU.exe";
+    private static final String MELD_PATH = "meld"; // Meld is available in PATH on Linux
 
     private String cleanVersion;
     private String mcVersion;
@@ -43,13 +43,7 @@ public class MinecraftVersionHandler {
                 return;
             }
 
-            File winMergeFile = new File(WINMERGE_PATH).getAbsoluteFile();
-            if (!winMergeFile.exists()) {
-                LOGGER.error("WinMerge not found at: {}", winMergeFile.getPath());
-                return;
-            }
-
-            launchWinMerge(winMergeFile.getPath(), oldVersionDir.toPath(), newVersionDir.toPath());
+            launchMeld(oldVersionDir.toPath(), newVersionDir.toPath());
 
         } catch (Exception e) {
             LOGGER.error("Error during version comparison: {}", e.getMessage(), e);
@@ -72,31 +66,26 @@ public class MinecraftVersionHandler {
         return versionDir;
     }
 
-    private void launchWinMerge(String winMergePath, Path oldPath, Path newPath) {
+    private void launchMeld(Path oldPath, Path newPath) {
         try {
             ProcessBuilder processBuilder = new ProcessBuilder(
-                winMergePath,
-                "/r",
-                "/e",
-                "/u",
-                "/dl", "Version " + cleanVersion,
-                "/dr", "Version " + mcVersion,
+                MELD_PATH,
+                "--diff",
                 oldPath.toString(),
                 newPath.toString()
             );
 
-            LOGGER.info("Launching WinMerge to compare:");
-            LOGGER.info("  WinMerge path: {}", winMergePath);
+            LOGGER.info("Launching Meld to compare:");
             LOGGER.info("  Old version ({}): {}", cleanVersion, oldPath);
             LOGGER.info("  New version ({}): {}", mcVersion, newPath);
 
             Process process = processBuilder.start();
             int exitCode = process.waitFor();
             
-            LOGGER.info("WinMerge comparison completed with exit code: {}", exitCode);
+            LOGGER.info("Meld comparison completed with exit code: {}", exitCode);
 
         } catch (IOException | InterruptedException e) {
-            LOGGER.error("Error launching WinMerge: {}", e.getMessage(), e);
+            LOGGER.error("Error launching Meld: {}", e.getMessage(), e);
         }
     }
 
