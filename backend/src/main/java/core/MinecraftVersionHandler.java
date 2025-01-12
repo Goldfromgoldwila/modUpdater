@@ -292,6 +292,7 @@ public class MinecraftVersionHandler {
 
     // Call this in constructor
     public MinecraftVersionHandler() {
-        configureLogging();
+        // Create diff_results directory if it doesn't exist
+        new File(DIFF_OUTPUT_DIR).mkdirs();
     }
 }
