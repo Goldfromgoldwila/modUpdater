@@ -802,32 +802,72 @@ public class MinecraftVersionHandler {
             // Added Files
             if (!added.isEmpty()) {
                 sb.append("=== Added Files ===\n");
-                added.stream().sorted().forEach(file -> 
-                    sb.append(String.format("  + %s\n", file)));
+                List<String> sortedAdded = new ArrayList<>(added);
+                Collections.sort(sortedAdded);
+                for (String file : sortedAdded) {
+                    sb.append(String.format("  + %s\n", file));
+                }
                 sb.append("\n");
             }
 
             // Removed Files
             if (!removed.isEmpty()) {
                 sb.append("=== Removed Files ===\n");
-                removed.stream().sorted().forEach(file -> 
-                    sb.append(String.format("  - %s\n", file)));
+                List<String> sortedRemoved = new ArrayList<>(removed);
+                Collections.sort(sortedRemoved);
+                for (String file : sortedRemoved) {
+                    sb.append(String.format("  - %s\n", file));
+                }
                 sb.append("\n");
             }
 
             // Modified Files
             if (!modifications.isEmpty()) {
                 sb.append("=== Modified Files ===\n");
-                modifications.entrySet().stream()
-                    .sorted(Map.Entry.comparingByKey())
-                    .forEach(entry -> {
-                        sb.append(String.format("  ~ %s\n", entry.getKey()));
-                        sb.append(String.format("    Type: %s\n", entry.getValue().getType()));
-                        sb.append(String.format("    %s\n", entry.getValue().getDetails()));
-                    });
+                List<Map.Entry<String, FileModification>> sortedMods = 
+                    new ArrayList<>(modifications.entrySet());
+                Collections.sort(sortedMods, Map.Entry.comparingByKey());
+                
+                for (Map.Entry<String, FileModification> entry : sortedMods) {
+                    sb.append(String.format("  ~ %s\n", entry.getKey()));
+                    FileModification mod = entry.getValue();
+                    sb.append(String.format("    Type: %s\n", mod.getType()));
+                    sb.append(String.format("    %s\n\n", mod.getDetails()));
+                }
             }
 
             return sb.toString();
+        }
+
+        // Add this method to limit output size if needed
+        private String truncateOutput(Set<String> files, int limit) {
+            StringBuilder sb = new StringBuilder();
+            int count = 0;
+            int total = files.size();
+            
+            List<String> sortedFiles = new ArrayList<>(files);
+            Collections.sort(sortedFiles);
+            
+            for (String file : sortedFiles) {
+                if (count < limit) {
+                    sb.append(String.format("  + %s\n", file));
+                }
+                count++;
+            }
+            
+            if (count > limit) {
+                sb.append(String.format("\n  ... and %d more files\n", total - limit));
+            }
+            
+            return sb.toString();
+        }
+
+        // Add this method to format file modifications
+        private String formatModification(FileModification mod) {
+            if (mod.getType().equals("SIZE_CHANGED")) {
+                return String.format("    Size changed: %s\n", mod.getDetails());
+            }
+            return String.format("    %s: %s\n", mod.getType(), mod.getDetails());
         }
     }
 
