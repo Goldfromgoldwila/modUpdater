@@ -2,13 +2,18 @@ package core;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import jakarta.annotation.PostConstruct;
 import java.io.*;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import core.model.FileChange;
+import core.model.FileInfo;
+import core.service.FileChangeService;
 
 @Component
 public class MinecraftVersionHandler {
@@ -19,6 +24,30 @@ public class MinecraftVersionHandler {
 
     private String cleanVersion;
     private String mcVersion;
+    private FileChangeService fileChangeService;
+
+    @Autowired
+    public void setFileChangeService(FileChangeService fileChangeService) {
+        if (fileChangeService == null) {
+            throw new IllegalArgumentException("FileChangeService cannot be null");
+        }
+        this.fileChangeService = fileChangeService;
+    }
+
+    @PostConstruct
+    private void init() {
+        createDiffOutputDirectory();
+    }
+
+    private void createDiffOutputDirectory() {
+        try {
+            Files.createDirectories(Paths.get(DIFF_OUTPUT_DIR));
+            Files.createDirectories(Paths.get(DECOMPILED_DIR));
+        } catch (IOException e) {
+            LOGGER.error("Failed to create directories: {}", e.getMessage());
+            throw new RuntimeException("Failed to create required directories", e);
+        }
+    }
 
     public void setCleanVersion(String cleanVersion) {
         this.cleanVersion = cleanVersion;
@@ -30,12 +59,7 @@ public class MinecraftVersionHandler {
 
     public void compareVersions(String cleanVersion, String mcVersion) {
         LOGGER.info("\n=== Starting Version Comparison ===");
-        LOGGER.info("Source version: {}", cleanVersion);
-        LOGGER.info("Target version: {}", mcVersion);
         
-        this.cleanVersion = cleanVersion;
-        this.mcVersion = mcVersion;
-
         try {
             File oldVersionDir = findVersionDirectory(cleanVersion);
             File newVersionDir = findVersionDirectory(mcVersion);
@@ -44,20 +68,25 @@ public class MinecraftVersionHandler {
                 return;
             }
 
-            // Create diff output directory
-            createDiffOutputDirectory();
+            FileChange fileChange = new FileChange(cleanVersion, mcVersion);
+            compareDirectories(oldVersionDir.toPath(), newVersionDir.toPath(), fileChange);
+            
+            // Add statistics
+            Map<String, String> stats = new HashMap<>();
+            stats.put("totalAdded", String.valueOf(fileChange.getAddedFiles().size()));
+            stats.put("totalModified", String.valueOf(fileChange.getModifiedFiles().size()));
+            stats.put("totalDeleted", String.valueOf(fileChange.getDeletedFiles().size()));
+            stats.put("totalChanges", String.valueOf(
+                fileChange.getAddedFiles().size() + 
+                fileChange.getModifiedFiles().size() + 
+                fileChange.getDeletedFiles().size()
+            ));
+            fileChange.setStatistics(stats);
 
-            // Perform comparison using different methods
-            Map<String, List<String>> changes = compareDirectories(oldVersionDir.toPath(), newVersionDir.toPath());
-            generateComparisonReport(changes);
-
-            // Use Meld for visual comparison if available
-            if (isMeldAvailable()) {
-                launchMeldComparison(oldVersionDir.toPath(), newVersionDir.toPath());
-            } else {
-                LOGGER.warn("Meld is not available. Using fallback comparison method.");
-                performFallbackComparison(oldVersionDir, newVersionDir);
-            }
+            // Generate and save report
+            String reportPath = generateComparisonReport(fileChange);
+            fileChange.setDiffReportPath(reportPath);
+            fileChangeService.saveChange(fileChange);
 
         } catch (Exception e) {
             LOGGER.error("Error during version comparison: {}", e.getMessage(), e);
@@ -76,108 +105,113 @@ public class MinecraftVersionHandler {
         return true;
     }
 
-    private void createDiffOutputDirectory() {
-        File diffDir = new File(DIFF_OUTPUT_DIR);
-        if (!diffDir.exists()) {
-            diffDir.mkdirs();
-            LOGGER.info("Created diff output directory: {}", diffDir.getAbsolutePath());
-        }
-    }
+    private void compareDirectories(Path oldDir, Path newDir, FileChange fileChange) throws IOException {
+        List<FileInfo> addedFiles = new ArrayList<>();
+        List<FileInfo> modifiedFiles = new ArrayList<>();
+        List<FileInfo> deletedFiles = new ArrayList<>();
 
-    private Map<String, List<String>> compareDirectories(Path oldPath, Path newPath) throws IOException {
-        Map<String, List<String>> changes = new HashMap<>();
-        changes.put("added", new ArrayList<>());
-        changes.put("modified", new ArrayList<>());
-        changes.put("deleted", new ArrayList<>());
-
-        // Get all files from both directories
-        Set<String> oldFiles = getRelativeFilePaths(oldPath);
-        Set<String> newFiles = getRelativeFilePaths(newPath);
-
-        // Find added files
-        newFiles.stream()
-            .filter(file -> !oldFiles.contains(file))
-            .forEach(file -> changes.get("added").add(file));
+        // Find added and modified files
+        Files.walk(newDir)
+            .filter(Files::isRegularFile)
+            .forEach(newPath -> {
+                Path relativePath = newDir.relativize(newPath);
+                Path oldPath = oldDir.resolve(relativePath);
+                
+                if (!Files.exists(oldPath)) {
+                    // Added file
+                    addedFiles.add(new FileInfo(
+                        relativePath.getFileName().toString(),
+                        relativePath.toString(),
+                        "ADDED"
+                    ));
+                } else if (filesAreDifferent(oldPath, newPath)) {
+                    // Modified file
+                    modifiedFiles.add(new FileInfo(
+                        relativePath.getFileName().toString(),
+                        oldPath.toString(),
+                        newPath.toString()
+                    ));
+                }
+            });
 
         // Find deleted files
-        oldFiles.stream()
-            .filter(file -> !newFiles.contains(file))
-            .forEach(file -> changes.get("deleted").add(file));
+        Files.walk(oldDir)
+            .filter(Files::isRegularFile)
+            .forEach(oldPath -> {
+                Path relativePath = oldDir.relativize(oldPath);
+                Path newPath = newDir.resolve(relativePath);
+                
+                if (!Files.exists(newPath)) {
+                    deletedFiles.add(new FileInfo(
+                        relativePath.getFileName().toString(),
+                        relativePath.toString(),
+                        "DELETED"
+                    ));
+                }
+            });
 
-        // Find modified files
-        oldFiles.stream()
-            .filter(newFiles::contains)
-            .filter(file -> isFileModified(oldPath.resolve(file), newPath.resolve(file)))
-            .forEach(file -> changes.get("modified").add(file));
-
-        return changes;
+        fileChange.setAddedFiles(addedFiles);
+        fileChange.setModifiedFiles(modifiedFiles);
+        fileChange.setDeletedFiles(deletedFiles);
     }
 
-    private Set<String> getRelativeFilePaths(Path basePath) throws IOException {
-        try (Stream<Path> paths = Files.walk(basePath)) {
-            return paths
-                .filter(Files::isRegularFile)
-                .map(path -> basePath.relativize(path).toString())
-                .collect(Collectors.toSet());
-        }
-    }
+    private String generateComparisonReport(FileChange fileChange) {
+        String reportPath = Paths.get(DIFF_OUTPUT_DIR, 
+            String.format("diff_report_%s_to_%s.txt", 
+                fileChange.getSourceVersion(), 
+                fileChange.getTargetVersion()
+            )).toString();
+        
+        try (BufferedWriter writer = Files.newBufferedWriter(Paths.get(reportPath))) {
+            writer.write(String.format("Comparison between %s and %s\n", 
+                fileChange.getSourceVersion(), fileChange.getTargetVersion()));
+            writer.write("Generated at: " + fileChange.getTimestamp() + "\n\n");
 
-    private boolean isFileModified(Path oldFile, Path newFile) {
-        try {
-            byte[] oldContent = Files.readAllBytes(oldFile);
-            byte[] newContent = Files.readAllBytes(newFile);
-            return !Arrays.equals(oldContent, newContent);
-        } catch (IOException e) {
-            LOGGER.error("Error comparing files: {} and {}", oldFile, newFile, e);
-            return false;
-        }
-    }
+            // Write statistics
+            writer.write("=== Statistics ===\n");
+            fileChange.getStatistics().forEach((key, value) -> {
+                try {
+                    writer.write(String.format("%s: %s\n", key, value));
+                } catch (IOException e) {
+                    LOGGER.error("Error writing statistics: {}", e.getMessage());
+                }
+            });
 
-    private void generateComparisonReport(Map<String, List<String>> changes) {
-        int addedCount = changes.get("added").size();
-        int modifiedCount = changes.get("modified").size();
-        int deletedCount = changes.get("deleted").size();
-        int totalChanges = addedCount + modifiedCount + deletedCount;
-
-        LOGGER.info("\n=== Comparison Report Summary ===");
-        LOGGER.info("Total changes: {} files", totalChanges);
-        LOGGER.info("  Added:    {} files", addedCount);
-        LOGGER.info("  Modified: {} files", modifiedCount);
-        LOGGER.info("  Deleted:  {} files", deletedCount);
-        LOGGER.info("\n=== Detailed Changes ===");
-
-        // Write detailed changes to a file
-        Path reportPath = Paths.get(DIFF_OUTPUT_DIR, String.format("diff_report_%s_to_%s.txt", cleanVersion, mcVersion));
-        try (BufferedWriter writer = Files.newBufferedWriter(reportPath)) {
-            // Write summary
-            writer.write(String.format("Comparison between %s and %s\n", cleanVersion, mcVersion));
-            writer.write(String.format("Total changes: %d files\n", totalChanges));
-            writer.write(String.format("Added: %d, Modified: %d, Deleted: %d\n\n", addedCount, modifiedCount, deletedCount));
-
-            // Write added files
-            writer.write(String.format("\nAdded files (%d):\n", addedCount));
-            for (String file : changes.get("added")) {
-                writer.write("  + " + file + "\n");
-                LOGGER.info("  + {}", file);
+            // Write detailed changes
+            writer.write("\n=== Added Files ===\n");
+            for (FileInfo file : fileChange.getAddedFiles()) {
+                writer.write(String.format("+ %s (%s)\n", file.getFileName(), file.getFilePath()));
             }
 
-            // Write modified files
-            writer.write(String.format("\nModified files (%d):\n", modifiedCount));
-            for (String file : changes.get("modified")) {
-                writer.write("  * " + file + "\n");
-                LOGGER.info("  * {}", file);
+            writer.write("\n=== Modified Files ===\n");
+            for (FileInfo file : fileChange.getModifiedFiles()) {
+                writer.write(String.format("* %s\n  From: %s\n  To: %s\n", 
+                    file.getFileName(), file.getOriginalPath(), file.getNewPath()));
             }
 
-            // Write deleted files
-            writer.write(String.format("\nDeleted files (%d):\n", deletedCount));
-            for (String file : changes.get("deleted")) {
-                writer.write("  - " + file + "\n");
-                LOGGER.info("  - {}", file);
+            writer.write("\n=== Deleted Files ===\n");
+            for (FileInfo file : fileChange.getDeletedFiles()) {
+                writer.write(String.format("- %s (%s)\n", file.getFileName(), file.getFilePath()));
             }
 
-            LOGGER.info("\nDetailed report written to: {}", reportPath);
+            return reportPath;
         } catch (IOException e) {
             LOGGER.error("Error writing comparison report: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private boolean filesAreDifferent(Path file1, Path file2) {
+        try {
+            // Returns the position of first mismatch if files are different
+            long mismatch = Files.mismatch(file1, file2);
+            return mismatch != -1;
+        } catch (IOException e) {
+            LOGGER.error("Error comparing files '{}' and '{}': {}", 
+                file1.getFileName(), 
+                file2.getFileName(), 
+                e.getMessage());
+            return true; // Assume files are different if we can't compare them
         }
     }
 
