@@ -4,6 +4,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.ResponseEntity;
 import java.nio.file.*;
 import java.util.*;
 import java.io.*;
@@ -16,7 +17,7 @@ public class LogController {
     private static final String DIFF_DIR = "diff_results";
 
     @GetMapping("/version-comparison")
-    public Map<String, Object> getVersionComparisonLogs() {
+    public ResponseEntity<Map<String, Object>> getVersionComparisonLogs() {
         Map<String, Object> response = new HashMap<>();
         try {
             // Get the latest log file
@@ -24,34 +25,50 @@ public class LogController {
             if (logFile != null) {
                 List<String> logs = Files.readAllLines(logFile.toPath());
                 response.put("logs", logs);
+            } else {
+                response.put("logs", new ArrayList<>());
             }
 
             // Get the latest diff report
             File diffReport = getLatestFile(DIFF_DIR, "diff_report");
             if (diffReport != null) {
-                List<String> diffContent = Files.readAllLines(diffReport.toPath());
+                String diffContent = Files.readString(diffReport.toPath());
                 response.put("diffReport", diffContent);
+            } else {
+                response.put("diffReport", "");
             }
 
             response.put("success", true);
-        } catch (Exception e) {
+            return ResponseEntity.ok(response);
+
+        } catch (IOException e) {
             LOGGER.error("Error reading logs: {}", e.getMessage());
             response.put("success", false);
-            response.put("error", e.getMessage());
+            response.put("error", "Failed to read logs: " + e.getMessage());
+            return ResponseEntity.internalServerError().body(response);
         }
-        return response;
     }
 
     private File getLatestFile(String directory, String prefix) {
-        File dir = new File(directory);
-        if (!dir.exists()) return null;
+        try {
+            File dir = new File(directory);
+            if (!dir.exists()) {
+                dir.mkdirs();
+                return null;
+            }
 
-        File[] files = dir.listFiles((d, name) -> name.startsWith(prefix));
-        if (files == null || files.length == 0) return null;
+            File[] files = dir.listFiles((d, name) -> name.startsWith(prefix));
+            if (files == null || files.length == 0) {
+                return null;
+            }
 
-        return Arrays.stream(files)
-                .max(Comparator.comparingLong(File::lastModified))
-                .orElse(null);
+            return Arrays.stream(files)
+                    .max(Comparator.comparingLong(File::lastModified))
+                    .orElse(null);
+        } catch (Exception e) {
+            LOGGER.error("Error getting latest file: {}", e.getMessage());
+            return null;
+        }
     }
 
     @GetMapping("/stream")
