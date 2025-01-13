@@ -169,8 +169,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 method: 'GET',
                 headers: {
                     'Accept': 'application/json',
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'Origin': 'https://goldfromgoldwila.github.io'
                 },
+                mode: 'cors',
                 credentials: 'omit'
             });
             
@@ -185,18 +187,36 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         } catch (error) {
             console.error('Failed to fetch logs:', error);
-            // Stop polling on error
+            // Add more detailed error logging
+            if (error instanceof TypeError) {
+                console.error('Network error - server might be down or CORS might be misconfigured');
+            }
             stopPolling();
         }
     }
     
-    // Polling control functions
+    // Improved polling control
     let pollInterval = null;
+    const POLL_INTERVAL = 5000; // 5 seconds
+    const MAX_RETRIES = 3;
+    let retryCount = 0;
 
     function startPolling() {
         if (!pollInterval) {
             fetchLogs(); // Initial fetch
-            pollInterval = setInterval(fetchLogs, 5000);
+            pollInterval = setInterval(async () => {
+                try {
+                    await fetchLogs();
+                    retryCount = 0; // Reset retry count on successful fetch
+                } catch (error) {
+                    retryCount++;
+                    console.error(`Fetch attempt ${retryCount} failed`);
+                    if (retryCount >= MAX_RETRIES) {
+                        console.error('Max retries reached, stopping polling');
+                        stopPolling();
+                    }
+                }
+            }, POLL_INTERVAL);
         }
     }
 
@@ -204,9 +224,10 @@ document.addEventListener('DOMContentLoaded', function() {
         if (pollInterval) {
             clearInterval(pollInterval);
             pollInterval = null;
+            retryCount = 0;
         }
     }
 
     // Start polling when page loads
-    startPolling();
+    document.addEventListener('DOMContentLoaded', startPolling);
 });
