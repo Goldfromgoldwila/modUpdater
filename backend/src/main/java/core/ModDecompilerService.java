@@ -17,8 +17,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
-import javax.annotation.PreDestroy;
 import java.util.stream.Stream;
+import jakarta.annotation.PreDestroy;
 
 @Service
 public class ModDecompilerService {
