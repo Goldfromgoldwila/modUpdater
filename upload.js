@@ -185,11 +185,12 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         } catch (error) {
             console.error('Failed to fetch logs:', error);
-            // Optionally update UI to show error state
+            // Stop polling on error
+            stopPolling();
         }
     }
     
-    // Modify polling to stop on errors
+    // Polling control functions
     let pollInterval = null;
 
     function startPolling() {
