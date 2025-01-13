@@ -164,14 +164,48 @@ document.addEventListener('DOMContentLoaded', function() {
 
 
     async function fetchLogs() {
-        const response = await fetch('http://localhost:8080/api/logs/version-comparison');
-        const data = await response.json();
-        if (data.success) {
-            console.log('Logs:', data.logs);
-            console.log('Diff Report:', data.diffReport);
+        try {
+            const response = await fetch('https://modupdater.onrender.com/api/logs/version-comparison', {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json'
+                },
+                credentials: 'include'
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            if (data.success) {
+                console.log('Logs:', data.logs);
+                console.log('Diff Report:', data.diffReport);
+            }
+        } catch (error) {
+            console.error('Failed to fetch logs:', error);
+            // Optionally update UI to show error state
         }
     }
     
-    // For real-time updates
-    setInterval(fetchLogs, 5000); // Poll every 5 seconds
+    // Modify polling to stop on errors
+    let pollInterval = null;
+
+    function startPolling() {
+        if (!pollInterval) {
+            fetchLogs(); // Initial fetch
+            pollInterval = setInterval(fetchLogs, 5000);
+        }
+    }
+
+    function stopPolling() {
+        if (pollInterval) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+        }
+    }
+
+    // Start polling when page loads
+    startPolling();
 });
