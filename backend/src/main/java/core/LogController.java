@@ -10,7 +10,8 @@ import java.io.*;
 
 @RestController
 @RequestMapping("/api/logs")
-@CrossOrigin(origins = "*")
+@CrossOrigin(origins = {"http://localhost:3000", "http://localhost:5500", 
+    "https://modupdater.onrender.com", "https://goldfromgoldwila.github.io"})
 public class LogController {
     private static final Logger LOGGER = LoggerFactory.getLogger(LogController.class);
     private static final String LOG_DIR = "logs";

@@ -171,7 +171,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     'Accept': 'application/json',
                     'Content-Type': 'application/json'
                 },
-                credentials: 'include'
+                credentials: 'omit'
             });
             
             if (!response.ok) {
