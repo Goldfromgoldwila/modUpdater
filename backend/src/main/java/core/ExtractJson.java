@@ -38,24 +38,63 @@ public class ExtractJson {
                 throw new IllegalStateException("Mod JSON file not found");
             }
 
+            // Read and log original content
             JsonObject modJson = readJsonFile(modJsonFile);
+            LOGGER.info("=== Original JSON Content ===\n{}", 
+                new GsonBuilder().setPrettyPrinting().create().toJson(modJson));
+
             JsonObject depends = getOrCreateDependsObject(modJson);
             
+            // Get and clean current version
             String currentVersion = depends.has("minecraft") ? 
-                depends.get("minecraft").getAsString() : "";
-            LOGGER.info("Current version: {}", currentVersion);
+                depends.get("minecraft").getAsString().replaceAll("[>=<]", "") : "";
+            LOGGER.info("Current version (cleaned): {}", currentVersion);
             
+            // Update version (without operators)
             depends.addProperty("minecraft", targetVersion);
             LOGGER.info("Updated to version: {}", targetVersion);
             
+            // Log updated content
+            LOGGER.info("=== Updated JSON Content ===\n{}", 
+                new GsonBuilder().setPrettyPrinting().create().toJson(modJson));
+            
             saveJsonFile(modJsonFile, modJson);
             LOGGER.info("Successfully saved changes to {}", modJsonFile.getName());
+
+            // Call version handler with clean versions
+            MinecraftVersionHandler versionHandler = new MinecraftVersionHandler();
+            versionHandler.setCleanVersion(currentVersion);
+            versionHandler.setMcVersion(targetVersion);
+            versionHandler.compareVersions(currentVersion, targetVersion);
 
         } catch (Exception e) {
             LOGGER.error("Mod processing failed: {}", e.getMessage());
             throw new RuntimeException("Mod processing failed", e);
         }
     }
+
+    public void compareVersions(String cleanVersion, String targetVersion) {
+        LOGGER.info("\n=== Starting Version Comparison ===");
+        // Clean versions (remove any >= or <= operators)
+        String sourceVersion = cleanVersion.replaceAll("[>=<]", "").trim();
+        String newVersion = targetVersion.replaceAll("[>=<]", "").trim();
+        
+        LOGGER.info("Comparing versions {} and {}", sourceVersion, newVersion);
+        
+        try {
+            Path oldVersionPath = Paths.get(DECOMPILED_DIR, sourceVersion);
+            Path newVersionPath = Paths.get(DECOMPILED_DIR, newVersion);
+            
+            if (!Files.exists(oldVersionPath) || !Files.exists(newVersionPath)) {
+                LOGGER.error("One or both version directories not found");
+                return;
+            }
+
+        } catch (Exception e) {
+            LOGGER.error("Error comparing versions: {}", e.getMessage());
+        }
+    } 
+
 
     private File findLatestModDirectory() {
         try {
@@ -72,15 +111,15 @@ public class ExtractJson {
     }
 
     private JsonObject readJsonFile(File file) throws IOException {
-        try (FileReader reader = new FileReader(file)) {
-            return JsonParser.parseReader(reader).getAsJsonObject();
-        }
+        String content = Files.readString(file.toPath());
+        LOGGER.debug("Reading file content:\n{}", content);
+        return JsonParser.parseString(content).getAsJsonObject();
     }
 
     private void saveJsonFile(File file, JsonObject jsonObject) throws IOException {
-        try (FileWriter writer = new FileWriter(file)) {
-            new GsonBuilder().setPrettyPrinting().create().toJson(jsonObject, writer);
-        }
+        String content = new GsonBuilder().setPrettyPrinting().create().toJson(jsonObject);
+        LOGGER.debug("Writing file content:\n{}", content);
+        Files.writeString(file.toPath(), content);
     }
 
     private JsonObject getOrCreateDependsObject(JsonObject jsonObject) {
