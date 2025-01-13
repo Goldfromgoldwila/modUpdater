@@ -1,16 +1,8 @@
 core\MinecraftVersionHandler.class
 core\VersionComparator.class
-core\controller\FileChangeController.class
-core\service\ChangeStatisticsService.class
-core\service\FileChangeService.class
-core\service\LocalDateTimeAdapter.class
-core\service\FileChangeService$1.class
-core\model\FileChange.class
 core\ModDecompilerService.class
 core\WebConfig.class
-core\ExtractJson$VersionCompatibility.class
 core\ConvertController.class
-core\model\FileInfo.class
 core\ExtractJson.class
 core\HealthController.class
 core\Main.class
