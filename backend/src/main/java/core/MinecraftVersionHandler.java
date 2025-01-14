@@ -66,15 +66,19 @@ public class MinecraftVersionHandler {
                 return;
             }
 
-            // Collect statistics first
-            Map<String, Integer> stats = collectChangeStatistics(oldVersionPath, newVersionPath);
-            logChangeStatistics(stats);
+            // Create lists to store file changes
+            List<String> addedFiles = new ArrayList<>();
+            List<String> modifiedFiles = new ArrayList<>();
+            List<String> deletedFiles = new ArrayList<>();
 
-            // Generate detailed diff using Meld
+            // Get statistics and populate file lists
+            Map<String, Integer> stats = collectChangeStatistics(oldVersionPath, newVersionPath, 
+                addedFiles, modifiedFiles, deletedFiles);
+
+            logChangeStatistics(stats);
             generateMeldDiff(oldVersionPath, newVersionPath);
-            
-            // Generate text report
-            generateTextReport(oldVersionPath, newVersionPath, stats);
+            generateTextReport(oldVersionPath, newVersionPath, stats, 
+                addedFiles, modifiedFiles, deletedFiles);
 
             LOGGER.info("Version comparison completed successfully");
         } catch (Exception e) {
@@ -82,11 +86,9 @@ public class MinecraftVersionHandler {
         }
     }
 
-    private Map<String, Integer> collectChangeStatistics(Path oldPath, Path newPath) throws IOException {
+    private Map<String, Integer> collectChangeStatistics(Path oldPath, Path newPath,
+            List<String> addedFiles, List<String> modifiedFiles, List<String> deletedFiles) throws IOException {
         Map<String, Integer> stats = new HashMap<>();
-        List<String> addedFiles = new ArrayList<>();
-        List<String> modifiedFiles = new ArrayList<>();
-        List<String> deletedFiles = new ArrayList<>();
         
         stats.put("added", 0);
         stats.put("modified", 0);
@@ -119,22 +121,6 @@ public class MinecraftVersionHandler {
                     deletedFiles.add(relativePath.toString());
                 }
             });
-        }
-
-        // Log file details after collecting all statistics
-        if (!addedFiles.isEmpty()) {
-            LOGGER.info("Added files:");
-            addedFiles.forEach(file -> LOGGER.info("  + {}", file));
-        }
-        
-        if (!modifiedFiles.isEmpty()) {
-            LOGGER.info("Modified files:");
-            modifiedFiles.forEach(file -> LOGGER.info("  * {}", file));
-        }
-        
-        if (!deletedFiles.isEmpty()) {
-            LOGGER.info("Deleted files:");
-            deletedFiles.forEach(file -> LOGGER.info("  - {}", file));
         }
 
         return stats;
@@ -172,7 +158,8 @@ public class MinecraftVersionHandler {
         }
     }
 
-    private void generateTextReport(Path oldPath, Path newPath, Map<String, Integer> stats) {
+    private void generateTextReport(Path oldPath, Path newPath, Map<String, Integer> stats, 
+            List<String> addedFiles, List<String> modifiedFiles, List<String> deletedFiles) {
         try {
             String timestamp = String.valueOf(System.currentTimeMillis());
             Path reportPath = Paths.get(DIFF_OUTPUT_DIR, 
@@ -183,20 +170,37 @@ public class MinecraftVersionHandler {
                 ));
 
             try (BufferedWriter writer = Files.newBufferedWriter(reportPath)) {
+                // Write header
                 writer.write(String.format("Comparison Report: %s -> %s\n", 
                     oldPath.getFileName(),
                     newPath.getFileName()
                 ));
                 writer.write("Generated at: " + new Date() + "\n\n");
-                writer.write("=== Statistics ===\n");
+                
+                // Write statistics
+                writer.write("=== Statistics Summary ===\n");
                 writer.write(String.format("Added files: %d\n", stats.get("added")));
                 writer.write(String.format("Modified files: %d\n", stats.get("modified")));
                 writer.write(String.format("Deleted files: %d\n", stats.get("deleted")));
-                writer.write(String.format("Total changes: %d\n", 
+                writer.write(String.format("Total changes: %d\n\n", 
                     stats.get("added") + stats.get("modified") + stats.get("deleted")));
+
+                // Write detailed file listings
+                writer.write("=== Added Files ===\n");
+                for (String file : addedFiles) {
+                    writer.write("+ " + file + "\n");
+                }
+                writer.write("\n=== Modified Files ===\n");
+                for (String file : modifiedFiles) {
+                    writer.write("* " + file + "\n");
+                }
+                writer.write("\n=== Deleted Files ===\n");
+                for (String file : deletedFiles) {
+                    writer.write("- " + file + "\n");
+                }
             }
             
-            LOGGER.info("Generated diff report: {}", reportPath);
+            LOGGER.info("Generated detailed diff report: {}", reportPath);
         } catch (IOException e) {
             LOGGER.error("Failed to generate text report: {}", e.getMessage());
         }
