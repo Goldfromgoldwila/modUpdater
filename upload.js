@@ -230,4 +230,21 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Start polling when page loads
     document.addEventListener('DOMContentLoaded', startPolling);
+
+    async function downloadReport(filename) {
+        try {
+            const response = await fetch(`https://modupdater.onrender.com/api/download-report/${filename}`);
+            if (!response.ok) throw new Error('Download failed');
+            
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            window.URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error('Error downloading report:', error);
+        }
+    }
 });
