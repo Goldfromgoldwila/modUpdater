@@ -84,6 +84,10 @@ public class MinecraftVersionHandler {
 
     private Map<String, Integer> collectChangeStatistics(Path oldPath, Path newPath) throws IOException {
         Map<String, Integer> stats = new HashMap<>();
+        List<String> addedFiles = new ArrayList<>();
+        List<String> modifiedFiles = new ArrayList<>();
+        List<String> deletedFiles = new ArrayList<>();
+        
         stats.put("added", 0);
         stats.put("modified", 0);
         stats.put("deleted", 0);
@@ -96,10 +100,10 @@ public class MinecraftVersionHandler {
                 
                 if (!Files.exists(oldFile)) {
                     stats.put("added", stats.get("added") + 1);
-                    LOGGER.debug("Added file: {}", relativePath);
+                    addedFiles.add(relativePath.toString());
                 } else if (filesAreDifferent(oldFile, newFile)) {
                     stats.put("modified", stats.get("modified") + 1);
-                    LOGGER.debug("Modified file: {}", relativePath);
+                    modifiedFiles.add(relativePath.toString());
                 }
             });
         }
@@ -112,9 +116,25 @@ public class MinecraftVersionHandler {
                 
                 if (!Files.exists(newFile)) {
                     stats.put("deleted", stats.get("deleted") + 1);
-                    LOGGER.debug("Deleted file: {}", relativePath);
+                    deletedFiles.add(relativePath.toString());
                 }
             });
+        }
+
+        // Log file details after collecting all statistics
+        if (!addedFiles.isEmpty()) {
+            LOGGER.info("Added files:");
+            addedFiles.forEach(file -> LOGGER.info("  + {}", file));
+        }
+        
+        if (!modifiedFiles.isEmpty()) {
+            LOGGER.info("Modified files:");
+            modifiedFiles.forEach(file -> LOGGER.info("  * {}", file));
+        }
+        
+        if (!deletedFiles.isEmpty()) {
+            LOGGER.info("Deleted files:");
+            deletedFiles.forEach(file -> LOGGER.info("  - {}", file));
         }
 
         return stats;
@@ -183,12 +203,17 @@ public class MinecraftVersionHandler {
     }
 
     private void logChangeStatistics(Map<String, Integer> stats) {
-        LOGGER.info("\n=== Change Statistics ===");
-        LOGGER.info("Added files: {}", stats.get("added"));
-        LOGGER.info("Modified files: {}", stats.get("modified"));
-        LOGGER.info("Deleted files: {}", stats.get("deleted"));
-        LOGGER.info("Total changes: {}", 
-            stats.get("added") + stats.get("modified") + stats.get("deleted"));
+        int totalChanges = stats.get("added") + stats.get("modified") + stats.get("deleted");
+        
+        // Log summary first
+        LOGGER.info("\n=== Change Statistics Summary ===");
+        LOGGER.info("Total files changed: {}", totalChanges);
+        LOGGER.info("  - Added:    {}", stats.get("added"));
+        LOGGER.info("  - Modified: {}", stats.get("modified"));
+        LOGGER.info("  - Deleted:  {}", stats.get("deleted"));
+        
+        // Then log file details
+        LOGGER.info("\n=== Detailed File Changes ===");
     }
 
     // Getters and setters remain the same

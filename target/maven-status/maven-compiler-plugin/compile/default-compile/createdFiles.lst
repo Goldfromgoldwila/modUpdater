@@ -2,6 +2,7 @@ core\MinecraftVersionHandler.class
 core\VersionComparator.class
 core\ModDecompilerService.class
 core\WebConfig.class
+core\VersionParser.class
 core\ConvertController.class
 core\ExtractJson.class
 core\HealthController.class

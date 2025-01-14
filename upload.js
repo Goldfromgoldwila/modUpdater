@@ -231,20 +231,36 @@ document.addEventListener('DOMContentLoaded', function() {
     // Start polling when page loads
     document.addEventListener('DOMContentLoaded', startPolling);
 
-    async function downloadReport(filename) {
+    async function downloadDiff() {
         try {
-            const response = await fetch(`https://modupdater.onrender.com/api/download-report/${filename}`);
+            const response = await fetch('https://modupdater.onrender.com/api/download-diff', {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json',
+                    'Origin': 'https://goldfromgoldwila.github.io'
+                },
+                mode: 'cors',
+                credentials: 'omit'
+            });
+            
             if (!response.ok) throw new Error('Download failed');
             
             const blob = await response.blob();
+            const filename = response.headers.get('content-disposition')
+                ?.split('filename=')[1]?.replace(/"/g, '') || 'diff.txt';
+                
+            // Create download link
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
             a.download = filename;
+            document.body.appendChild(a);
             a.click();
+            document.body.removeChild(a);
             window.URL.revokeObjectURL(url);
         } catch (error) {
-            console.error('Error downloading report:', error);
+            console.error('Error downloading diff:', error);
+            alert('Failed to download diff file: ' + error.message);
         }
     }
 });

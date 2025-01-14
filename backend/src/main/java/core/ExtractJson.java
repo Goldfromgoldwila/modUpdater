@@ -6,20 +6,21 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import java.io.*;
 import java.nio.file.*;
-import java.util.Map;
-import java.util.Comparator;
+import java.util.*;
 
 @Component
 @RestController
 @RequestMapping("/api")
+@CrossOrigin(origins = {"https://goldfromgoldwila.github.io", "https://modupdater.onrender.com"})
 public class ExtractJson {
     private static final Logger LOGGER = LoggerFactory.getLogger(ExtractJson.class);
     private static final String DECOMPILED_DIR = "decompiled_mods";
@@ -47,8 +48,12 @@ public class ExtractJson {
             
             // Get and clean current version
             String currentVersion = depends.has("minecraft") ? 
-                depends.get("minecraft").getAsString().replaceAll("[>=<]", "") : "";
-            LOGGER.info("Current version (cleaned): {}", currentVersion);
+                depends.get("minecraft").getAsString() : "";
+            
+            // Clean the version - will take the more detailed version if multiple exist
+            String cleanVersion = VersionParser.cleanVersion(currentVersion);
+            LOGGER.info("Original version: '{}' -> Clean version: '{}'", 
+                currentVersion, cleanVersion);
             
             // Update version (without operators)
             depends.addProperty("minecraft", targetVersion);
@@ -63,9 +68,9 @@ public class ExtractJson {
 
             // Call version handler with clean versions
             MinecraftVersionHandler versionHandler = new MinecraftVersionHandler();
-            versionHandler.setCleanVersion(currentVersion);
+            versionHandler.setCleanVersion(cleanVersion);
             versionHandler.setMcVersion(targetVersion);
-            versionHandler.compareVersions(currentVersion, targetVersion);
+            versionHandler.compareVersions(cleanVersion, targetVersion);
 
         } catch (Exception e) {
             LOGGER.error("Mod processing failed: {}", e.getMessage());
@@ -144,6 +149,31 @@ public class ExtractJson {
                 "success", false,
                 "error", e.getMessage()
             ));
+        }
+    }
+
+    @GetMapping("/download-diff")
+    public ResponseEntity<Resource> downloadLatestDiff() {
+        try {
+            File diffDir = new File("diff_results");
+            File latestDiff = Arrays.stream(diffDir.listFiles())
+                .filter(file -> file.getName().startsWith("diff_report_"))
+                .max(Comparator.comparingLong(File::lastModified))
+                .orElse(null);
+
+            if (latestDiff == null) {
+                return ResponseEntity.notFound().build();
+            }
+
+            Resource resource = new FileSystemResource(latestDiff);
+            return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_PLAIN)
+                .header(HttpHeaders.CONTENT_DISPOSITION, 
+                    "attachment; filename=\"" + latestDiff.getName() + "\"")
+                .body(resource);
+        } catch (Exception e) {
+            LOGGER.error("Error downloading diff: {}", e.getMessage());
+            return ResponseEntity.internalServerError().build();
         }
     }
 }
