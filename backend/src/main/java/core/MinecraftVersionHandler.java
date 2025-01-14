@@ -99,13 +99,14 @@ public class MinecraftVersionHandler {
             newFiles.filter(Files::isRegularFile).forEach(newFile -> {
                 Path relativePath = newPath.relativize(newFile);
                 Path oldFile = oldPath.resolve(relativePath);
+                String fullPath = newFile.toAbsolutePath().toString();
                 
                 if (!Files.exists(oldFile)) {
                     stats.put("added", stats.get("added") + 1);
-                    addedFiles.add(relativePath.toString());
+                    addedFiles.add(relativePath.toString() + "|" + fullPath);
                 } else if (filesAreDifferent(oldFile, newFile)) {
                     stats.put("modified", stats.get("modified") + 1);
-                    modifiedFiles.add(relativePath.toString());
+                    modifiedFiles.add(relativePath.toString() + "|" + fullPath);
                 }
             });
         }
@@ -115,10 +116,11 @@ public class MinecraftVersionHandler {
             oldFiles.filter(Files::isRegularFile).forEach(oldFile -> {
                 Path relativePath = oldPath.relativize(oldFile);
                 Path newFile = newPath.resolve(relativePath);
+                String fullPath = oldFile.toAbsolutePath().toString();
                 
                 if (!Files.exists(newFile)) {
                     stats.put("deleted", stats.get("deleted") + 1);
-                    deletedFiles.add(relativePath.toString());
+                    deletedFiles.add(relativePath.toString() + "|" + fullPath);
                 }
             });
         }
@@ -170,14 +172,12 @@ public class MinecraftVersionHandler {
                 ));
 
             try (BufferedWriter writer = Files.newBufferedWriter(reportPath)) {
-                // Write header
+                // Write header and statistics (unchanged)
                 writer.write(String.format("Comparison Report: %s -> %s\n", 
-                    oldPath.getFileName(),
-                    newPath.getFileName()
-                ));
+                    oldPath.getFileName(), newPath.getFileName()));
                 writer.write("Generated at: " + new Date() + "\n\n");
                 
-                // Write statistics
+                // Write statistics summary (unchanged)
                 writer.write("=== Statistics Summary ===\n");
                 writer.write(String.format("Added files: %d\n", stats.get("added")));
                 writer.write(String.format("Modified files: %d\n", stats.get("modified")));
@@ -185,18 +185,26 @@ public class MinecraftVersionHandler {
                 writer.write(String.format("Total changes: %d\n\n", 
                     stats.get("added") + stats.get("modified") + stats.get("deleted")));
 
-                // Write detailed file listings
+                // Write detailed file listings with paths
                 writer.write("=== Added Files ===\n");
                 for (String file : addedFiles) {
-                    writer.write("+ " + file + "\n");
+                    String[] parts = file.split("\\|");
+                    writer.write("+ File: " + parts[0] + "\n");
+                    writer.write("  Path: " + parts[1] + "\n\n");
                 }
-                writer.write("\n=== Modified Files ===\n");
+
+                writer.write("=== Modified Files ===\n");
                 for (String file : modifiedFiles) {
-                    writer.write("* " + file + "\n");
+                    String[] parts = file.split("\\|");
+                    writer.write("* File: " + parts[0] + "\n");
+                    writer.write("  Path: " + parts[1] + "\n\n");
                 }
-                writer.write("\n=== Deleted Files ===\n");
+
+                writer.write("=== Deleted Files ===\n");
                 for (String file : deletedFiles) {
-                    writer.write("- " + file + "\n");
+                    String[] parts = file.split("\\|");
+                    writer.write("- File: " + parts[0] + "\n");
+                    writer.write("  Path: " + parts[1] + "\n\n");
                 }
             }
             
