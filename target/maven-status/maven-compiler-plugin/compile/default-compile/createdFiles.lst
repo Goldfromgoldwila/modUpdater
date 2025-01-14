@@ -1,5 +1,7 @@
+core\MappingController.class
 core\MinecraftVersionHandler.class
 core\VersionComparator.class
+core\MappingComparator.class
 core\ModDecompilerService.class
 core\WebConfig.class
 core\VersionParser.class
@@ -9,3 +11,4 @@ core\HealthController.class
 core\Main.class
 core\UploadController.class
 core\LogController.class
+core\VersionCompareRequest.class

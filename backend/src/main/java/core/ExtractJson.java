@@ -72,6 +72,14 @@ public class ExtractJson {
             versionHandler.setMcVersion(targetVersion);
             versionHandler.compareVersions(cleanVersion, targetVersion);
 
+            // Add mapping comparison
+            LOGGER.info("Starting mapping comparison between versions");
+            MappingComparator mappingComparator = new MappingComparator();
+            mappingComparator.compareYarnMappings(
+                convertToYarnVersion(cleanVersion),
+                convertToYarnVersion(targetVersion)
+            );
+
         } catch (Exception e) {
             LOGGER.error("Mod processing failed: {}", e.getMessage());
             throw new RuntimeException("Mod processing failed", e);
@@ -175,5 +183,20 @@ public class ExtractJson {
             LOGGER.error("Error downloading diff: {}", e.getMessage());
             return ResponseEntity.internalServerError().build();
         }
+    }
+
+    private String convertToYarnVersion(String version) {
+        Map<String, String> yarnBuilds = new HashMap<>();
+        yarnBuilds.put("1.21.4", "1.21.4+build.8");
+        yarnBuilds.put("1.21.3", "1.21.3+build.2");
+        yarnBuilds.put("1.21.2", "1.21.2+build.1");
+        yarnBuilds.put("1.21.1", "1.21.1+build.3");
+        yarnBuilds.put("1.21", "1.21+build.9");
+
+        String yarnVersion = yarnBuilds.get(version);
+        if (yarnVersion == null) {
+            throw new IllegalArgumentException("Unsupported Minecraft version: " + version);
+        }
+        return yarnVersion;
     }
 }
