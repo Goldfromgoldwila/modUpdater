@@ -3,8 +3,9 @@ package core;
 import org.benf.cfr.reader.api.CfrDriver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.stereotype.Service;
 
 import java.io.*;
 import java.nio.file.*;
@@ -20,6 +21,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.stream.Stream;
 import jakarta.annotation.PreDestroy;
+import core.event.DecompilationCompleteEvent;
 
 @Service
 public class ModDecompilerService {
@@ -34,7 +36,7 @@ public class ModDecompilerService {
     private final ExecutorService executorService = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
 
     @Autowired
-    private ReadModFile readModFile;
+    private ApplicationEventPublisher eventPublisher;
 
     public void decompileLatestMod() {
         try {
@@ -64,7 +66,7 @@ public class ModDecompilerService {
             CompletableFuture.allOf(extractionFuture, decompilationFuture).join();
             logger.info("Decompilation completed for mod: {}", currentModName);
 
-            processDecompiledFiles(currentModName);
+            eventPublisher.publishEvent(new DecompilationCompleteEvent(this, currentModName));
 
         } catch (Exception e) {
             logger.error("Error during decompilation process", e);
@@ -161,23 +163,5 @@ public class ModDecompilerService {
 
     public String getCurrentModName() {
         return currentModName;
-    }
-
-    public List<ModFile> processDecompiledFiles(String version) {
-        try {
-            if (currentModName == null) {
-                logger.warn("No mod has been decompiled yet");
-                return Collections.emptyList();
-            }
-            
-            logger.info("Processing decompiled files for mod: {}", currentModName);
-            List<ModFile> modFiles = readModFile.scanModFiles(version);
-            logger.info("Successfully processed {} files", modFiles.size());
-            return modFiles;
-            
-        } catch (Exception e) {
-            logger.error("Error processing decompiled files", e);
-            throw new RuntimeException("Failed to process decompiled files", e);
-        }
     }
 }
