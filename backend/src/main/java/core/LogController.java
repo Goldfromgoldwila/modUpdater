@@ -9,6 +9,9 @@ import org.springframework.http.MediaType;
 import java.nio.file.*;
 import java.util.*;
 import java.io.*;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
 
 @RestController
 @RequestMapping("/api/logs")
@@ -133,6 +136,26 @@ public class LogController {
         } catch (Exception e) {
             LOGGER.error("Error streaming logs: {}", e.getMessage());
             return Collections.emptyList();
+        }
+    }
+
+    @GetMapping("/download-diff")
+    public ResponseEntity<Resource> downloadLatestDiff() {
+        try {
+            File diffReport = getLatestFile(DIFF_DIR, "diff_report");
+            if (diffReport == null) {
+                return ResponseEntity.notFound().build();
+            }
+
+            Resource resource = new FileSystemResource(diffReport);
+            return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, 
+                    "attachment; filename=\"" + diffReport.getName() + "\"")
+                .contentType(MediaType.TEXT_PLAIN)
+                .body(resource);
+        } catch (Exception e) {
+            LOGGER.error("Error downloading diff report: {}", e.getMessage());
+            return ResponseEntity.internalServerError().build();
         }
     }
 
