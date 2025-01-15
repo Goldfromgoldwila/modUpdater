@@ -4,6 +4,7 @@ import org.benf.cfr.reader.api.CfrDriver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.io.*;
 import java.nio.file.*;
@@ -29,7 +30,11 @@ public class ModDecompilerService {
     private static final int BUFFER_SIZE = 8192;
     private static final int THREAD_POOL_SIZE = Runtime.getRuntime().availableProcessors();
 
+    private String currentModName;
     private final ExecutorService executorService = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
+
+    @Autowired
+    private ReadModFile readModFile;
 
     public void decompileLatestMod() {
         try {
@@ -40,8 +45,8 @@ public class ModDecompilerService {
             }
 
             logger.info("Found latest mod: {}", latestMod.getName());
-            String modName = latestMod.getName().replaceFirst("\\.jar$", "");
-            File modDecompiledDir = new File(DECOMPILED_DIR, modName);
+            currentModName = latestMod.getName().replaceFirst("\\.jar$", "");
+            File modDecompiledDir = new File(DECOMPILED_DIR, currentModName);
             modDecompiledDir.mkdirs();
 
             CompletableFuture<Void> extractionFuture = CompletableFuture.runAsync(() -> {
@@ -57,8 +62,9 @@ public class ModDecompilerService {
             }, executorService);
 
             CompletableFuture.allOf(extractionFuture, decompilationFuture).join();
+            logger.info("Decompilation completed for mod: {}", currentModName);
 
-            logger.info("Decompilation and resource extraction completed successfully");
+            processDecompiledFiles(currentModName);
 
         } catch (Exception e) {
             logger.error("Error during decompilation process", e);
@@ -151,5 +157,27 @@ public class ModDecompilerService {
 
     public String getDecompiledPath() {
         return DECOMPILED_DIR;
+    }
+
+    public String getCurrentModName() {
+        return currentModName;
+    }
+
+    public List<ModFile> processDecompiledFiles(String version) {
+        try {
+            if (currentModName == null) {
+                logger.warn("No mod has been decompiled yet");
+                return Collections.emptyList();
+            }
+            
+            logger.info("Processing decompiled files for mod: {}", currentModName);
+            List<ModFile> modFiles = readModFile.scanModFiles(version);
+            logger.info("Successfully processed {} files", modFiles.size());
+            return modFiles;
+            
+        } catch (Exception e) {
+            logger.error("Error processing decompiled files", e);
+            throw new RuntimeException("Failed to process decompiled files", e);
+        }
     }
 }

@@ -72,13 +72,6 @@ public class ExtractJson {
             versionHandler.setMcVersion(targetVersion);
             versionHandler.compareVersions(cleanVersion, targetVersion);
 
-            // Add mapping comparison
-            LOGGER.info("Starting mapping comparison between versions");
-            MappingComparator mappingComparator = new MappingComparator();
-            mappingComparator.compareYarnMappings(
-                convertToYarnVersion(cleanVersion),
-                convertToYarnVersion(targetVersion)
-            );
 
         } catch (Exception e) {
             LOGGER.error("Mod processing failed: {}", e.getMessage());
@@ -142,61 +135,5 @@ public class ExtractJson {
         return jsonObject.getAsJsonObject("depends");
     }
 
-    @PostMapping("/convert-version")
-    public ResponseEntity<?> convertVersion(@RequestParam String targetVersion) {
-        try {
-            LOGGER.info("Received version conversion request: {}", targetVersion);
-            processMod(targetVersion);
-            return ResponseEntity.ok().body(Map.of(
-                "success", true,
-                "message", "Version updated to " + targetVersion
-            ));
-        } catch (Exception e) {
-            LOGGER.error("Version conversion failed: {}", e.getMessage());
-            return ResponseEntity.internalServerError().body(Map.of(
-                "success", false,
-                "error", e.getMessage()
-            ));
-        }
-    }
-
-    @GetMapping("/download-diff")
-    public ResponseEntity<Resource> downloadLatestDiff() {
-        try {
-            File diffDir = new File("diff_results");
-            File latestDiff = Arrays.stream(diffDir.listFiles())
-                .filter(file -> file.getName().startsWith("diff_report_"))
-                .max(Comparator.comparingLong(File::lastModified))
-                .orElse(null);
-
-            if (latestDiff == null) {
-                return ResponseEntity.notFound().build();
-            }
-
-            Resource resource = new FileSystemResource(latestDiff);
-            return ResponseEntity.ok()
-                .contentType(MediaType.TEXT_PLAIN)
-                .header(HttpHeaders.CONTENT_DISPOSITION, 
-                    "attachment; filename=\"" + latestDiff.getName() + "\"")
-                .body(resource);
-        } catch (Exception e) {
-            LOGGER.error("Error downloading diff: {}", e.getMessage());
-            return ResponseEntity.internalServerError().build();
-        }
-    }
-
-    private String convertToYarnVersion(String version) {
-        Map<String, String> yarnBuilds = new HashMap<>();
-        yarnBuilds.put("1.21.4", "1.21.4+build.8");
-        yarnBuilds.put("1.21.3", "1.21.3+build.2");
-        yarnBuilds.put("1.21.2", "1.21.2+build.1");
-        yarnBuilds.put("1.21.1", "1.21.1+build.3");
-        yarnBuilds.put("1.21", "1.21+build.9");
-
-        String yarnVersion = yarnBuilds.get(version);
-        if (yarnVersion == null) {
-            throw new IllegalArgumentException("Unsupported Minecraft version: " + version);
-        }
-        return yarnVersion;
-    }
+ 
 }
