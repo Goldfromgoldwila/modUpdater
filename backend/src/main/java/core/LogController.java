@@ -97,7 +97,7 @@ public class LogController {
     }
 
     @GetMapping("/latest-diff")
-    public ResponseEntity<String> getLatestDiffReport() {
+    public ResponseEntity<Map<String, Object>> getLatestDiffReport() {
         try {
             Path diffDirPath = Paths.get(DIFF_DIR);
             if (!Files.exists(diffDirPath)) {
@@ -110,9 +110,14 @@ public class LogController {
 
             if (latestReport.isPresent()) {
                 String content = Files.readString(latestReport.get());
+                Map<String, Object> response = new HashMap<>();
+                response.put("content", content);
+                response.put("filename", latestReport.get().getFileName().toString());
+                response.put("timestamp", latestReport.get().toFile().lastModified());
+                
                 return ResponseEntity.ok()
-                    .contentType(MediaType.TEXT_PLAIN)
-                    .body(content);
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(response);
             } else {
                 return ResponseEntity.notFound().build();
             }

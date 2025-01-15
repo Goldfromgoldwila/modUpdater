@@ -1,7 +1,7 @@
 // Global downloadDiff function
 async function downloadDiff() {
     try {
-        const response = await fetch('https://modupdater.onrender.com/api/download-diff', {
+        const response = await fetch('https://modupdater.onrender.com/api/logs/download-diff', {
             method: 'GET',
             headers: {
                 'Accept': 'application/json',
@@ -11,13 +11,14 @@ async function downloadDiff() {
             credentials: 'omit'
         });
         
-        if (!response.ok) throw new Error('Download failed');
+        if (!response.ok) {
+            throw new Error(`Download failed: ${response.status}`);
+        }
         
         const blob = await response.blob();
         const filename = response.headers.get('content-disposition')
-            ?.split('filename=')[1]?.replace(/"/g, '') || 'diff.txt';
+            ?.split('filename=')[1]?.replace(/"/g, '') || 'diff_report.txt';
             
-        // Create download link
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -28,7 +29,7 @@ async function downloadDiff() {
         window.URL.revokeObjectURL(url);
     } catch (error) {
         console.error('Error downloading diff:', error);
-        alert('Failed to download diff file: ' + error.message);
+        alert('Failed to download diff file. Please try again later.');
     }
 }
 
@@ -269,4 +270,44 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Start polling when page loads
     document.addEventListener('DOMContentLoaded', startPolling);
+});
+
+// Add this function to fetch and display the latest diff
+async function fetchLatestDiff() {
+    try {
+        const response = await fetch('https://modupdater.onrender.com/api/logs/latest-diff', {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+                'Origin': 'https://goldfromgoldwila.github.io'
+            },
+            mode: 'cors',
+            credentials: 'omit'
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Failed to fetch diff: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        const resultDiv = document.getElementById('result');
+        
+        // Display the diff content
+        resultDiv.innerHTML = `
+            <h3>Latest Diff Report</h3>
+            <p>Generated: ${new Date(data.timestamp).toLocaleString()}</p>
+            <pre>${data.content}</pre>
+            <button onclick="downloadDiff()">Download Report</button>
+        `;
+    } catch (error) {
+        console.error('Error fetching diff:', error);
+    }
+}
+
+// Call this function after successful upload
+document.getElementById('upload-button').addEventListener('click', async () => {
+    // ... existing upload code ...
+    
+    // After successful upload, wait a bit for processing and fetch the diff
+    setTimeout(fetchLatestDiff, 2000);
 });
