@@ -35,7 +35,7 @@ async function downloadDiff() {
 
 // Add event listener to the button when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
-    const downloadButton = document.getElementById('download-diff-btn');
+    const downloadButton = document.getElementById('download-file');
     if (downloadButton) {
         downloadButton.addEventListener('click', downloadDiff);
     }
