@@ -2,6 +2,7 @@ core\MinecraftVersionHandler.class
 core\event\DecompilationCompleteEvent.class
 core\ModDecompilerService.class
 core\WebConfig.class
+ReadReportFIle.class
 core\VersionParser.class
 core\ConvertController.class
 core\ReadModFile.class

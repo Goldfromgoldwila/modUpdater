@@ -185,7 +185,21 @@ public class MinecraftVersionHandler {
                 writer.write(String.format("Total changes: %d\n\n", 
                     stats.get("added") + stats.get("modified") + stats.get("deleted")));
 
-                // Write modified files with content comparison
+                // Write added files with content
+                writer.write("=== Added Files Content ===\n");
+                for (String file : addedFiles) {
+                    String[] parts = file.split("\\|");
+                    String relativePath = parts[0];
+                    writer.write("\nFile: " + relativePath + "\n");
+                    writer.write("----------------------------------------\n");
+                    
+                    Path newFilePath = newPath.resolve(relativePath);
+                    writer.write("Content:\n");
+                    writer.write(Files.readString(newFilePath) + "\n");
+                    writer.write("========================================\n\n");
+                }
+
+                // Write modified files with content
                 writer.write("=== Modified Files Content ===\n");
                 for (String file : modifiedFiles) {
                     String[] parts = file.split("\\|");
@@ -193,32 +207,29 @@ public class MinecraftVersionHandler {
                     writer.write("\nFile: " + relativePath + "\n");
                     writer.write("----------------------------------------\n");
                     
-                    // Read and write old version content
                     Path oldFilePath = oldPath.resolve(relativePath);
                     writer.write("Old Version (" + oldPath.getFileName() + "):\n");
                     writer.write(Files.readString(oldFilePath) + "\n");
                     writer.write("----------------------------------------\n");
                     
-                    // Read and write new version content
                     Path newFilePath = newPath.resolve(relativePath);
                     writer.write("New Version (" + newPath.getFileName() + "):\n");
                     writer.write(Files.readString(newFilePath) + "\n");
                     writer.write("========================================\n\n");
                 }
 
-                // Write other file changes
-                writer.write("\n=== Added Files ===\n");
-                for (String file : addedFiles) {
-                    String[] parts = file.split("\\|");
-                    writer.write("+ File: " + parts[0] + "\n");
-                    writer.write("  Path: " + parts[1] + "\n\n");
-                }
-
-                writer.write("=== Deleted Files ===\n");
+                // Write deleted files with content
+                writer.write("=== Deleted Files Content ===\n");
                 for (String file : deletedFiles) {
                     String[] parts = file.split("\\|");
-                    writer.write("- File: " + parts[0] + "\n");
-                    writer.write("  Path: " + parts[1] + "\n\n");
+                    String relativePath = parts[0];
+                    writer.write("\nFile: " + relativePath + "\n");
+                    writer.write("----------------------------------------\n");
+                    
+                    Path oldFilePath = oldPath.resolve(relativePath);
+                    writer.write("Content:\n");
+                    writer.write(Files.readString(oldFilePath) + "\n");
+                    writer.write("========================================\n\n");
                 }
             }
             
