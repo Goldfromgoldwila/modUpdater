@@ -82,6 +82,8 @@ public class ReadModFile {
                 });
         }
 
+        LOGGER.info("Diff report path: {}", reportPath.toString());
+
         try (PrintWriter writer = new PrintWriter(new FileWriter(reportPath.toFile(), true))) {
             writer.println("\n=== Mod Files List ===");
             writer.println("Generated: " + LocalDateTime.now());
