@@ -172,12 +172,12 @@ public class MinecraftVersionHandler {
                 ));
 
             try (BufferedWriter writer = Files.newBufferedWriter(reportPath)) {
-                // Write header and statistics (unchanged)
+                // Write header and statistics
                 writer.write(String.format("Comparison Report: %s -> %s\n", 
                     oldPath.getFileName(), newPath.getFileName()));
                 writer.write("Generated at: " + new Date() + "\n\n");
                 
-                // Write statistics summary (unchanged)
+                // Write statistics summary
                 writer.write("=== Statistics Summary ===\n");
                 writer.write(String.format("Added files: %d\n", stats.get("added")));
                 writer.write(String.format("Modified files: %d\n", stats.get("modified")));
@@ -185,18 +185,32 @@ public class MinecraftVersionHandler {
                 writer.write(String.format("Total changes: %d\n\n", 
                     stats.get("added") + stats.get("modified") + stats.get("deleted")));
 
-                // Write detailed file listings with paths
-                writer.write("=== Added Files ===\n");
+                // Write modified files with content comparison
+                writer.write("=== Modified Files Content ===\n");
+                for (String file : modifiedFiles) {
+                    String[] parts = file.split("\\|");
+                    String relativePath = parts[0];
+                    writer.write("\nFile: " + relativePath + "\n");
+                    writer.write("----------------------------------------\n");
+                    
+                    // Read and write old version content
+                    Path oldFilePath = oldPath.resolve(relativePath);
+                    writer.write("Old Version (" + oldPath.getFileName() + "):\n");
+                    writer.write(Files.readString(oldFilePath) + "\n");
+                    writer.write("----------------------------------------\n");
+                    
+                    // Read and write new version content
+                    Path newFilePath = newPath.resolve(relativePath);
+                    writer.write("New Version (" + newPath.getFileName() + "):\n");
+                    writer.write(Files.readString(newFilePath) + "\n");
+                    writer.write("========================================\n\n");
+                }
+
+                // Write other file changes
+                writer.write("\n=== Added Files ===\n");
                 for (String file : addedFiles) {
                     String[] parts = file.split("\\|");
                     writer.write("+ File: " + parts[0] + "\n");
-                    writer.write("  Path: " + parts[1] + "\n\n");
-                }
-
-                writer.write("=== Modified Files ===\n");
-                for (String file : modifiedFiles) {
-                    String[] parts = file.split("\\|");
-                    writer.write("* File: " + parts[0] + "\n");
                     writer.write("  Path: " + parts[1] + "\n\n");
                 }
 
@@ -208,7 +222,7 @@ public class MinecraftVersionHandler {
                 }
             }
             
-            LOGGER.info("Generated detailed diff report: {}", reportPath);
+            LOGGER.info("Generated detailed diff report with file contents: {}", reportPath);
         } catch (IOException e) {
             LOGGER.error("Failed to generate text report: {}", e.getMessage());
         }
