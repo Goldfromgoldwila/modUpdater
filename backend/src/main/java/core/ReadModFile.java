@@ -21,7 +21,7 @@ import java.util.stream.Stream;
 @Component
 public class ReadModFile {
     private static final Logger LOGGER = LoggerFactory.getLogger(ReadModFile.class);
-    private static final String DIFF_OUTPUT_DIR = "mod_file";
+    private static final String DIFF_OUTPUT_DIR = "diff_results";
 
     @EventListener
     public void handleDecompilationComplete(DecompilationCompleteEvent event) {
