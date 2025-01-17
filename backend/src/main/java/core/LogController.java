@@ -19,6 +19,7 @@ public class LogController {
     private static final Logger LOGGER = LoggerFactory.getLogger(LogController.class);
     private static final String LOG_DIR = "logs";
     private static final String DIFF_DIR = "diff_results";
+    private static final String DIFF_OUTPUT_DIR = "mod_file";
 
     @GetMapping("/version-comparison")
     public ResponseEntity<Map<String, Object>> getVersionComparisonLogs() {
@@ -144,22 +145,37 @@ public class LogController {
         }
     }
 
-    @GetMapping("/download-diff")
-    public ResponseEntity<Resource> downloadLatestDiff() {
+    @GetMapping("/mod-file-diff")
+    public ResponseEntity<Resource> downloadModFileDiff() {
         try {
-            File diffReport = getLatestFile(DIFF_DIR, "diff_report");
-            if (diffReport == null) {
+            Path diffDirPath = Paths.get(DIFF_OUTPUT_DIR);
+            if (!Files.exists(diffDirPath)) {
+                LOGGER.error("Diff directory not found: {}", DIFF_OUTPUT_DIR);
                 return ResponseEntity.notFound().build();
             }
 
-            Resource resource = new FileSystemResource(diffReport);
+            // Find the latest mod file diff report
+            Optional<Path> latestReport = Files.list(diffDirPath)
+                .filter(path -> path.getFileName().toString().startsWith("diff_report_mod"))
+                .max(Comparator.comparingLong(path -> path.toFile().lastModified()));
+
+            if (latestReport.isEmpty()) {
+                LOGGER.error("No mod file diff report found");
+                return ResponseEntity.notFound().build();
+            }
+
+            Path reportPath = latestReport.get();
+            Resource resource = new FileSystemResource(reportPath.toFile());
+
+            LOGGER.info("Serving mod file diff report: {}", reportPath);
+
             return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION, 
-                    "attachment; filename=\"" + diffReport.getName() + "\"")
                 .contentType(MediaType.TEXT_PLAIN)
+                .header(HttpHeaders.CONTENT_DISPOSITION, 
+                    "attachment; filename=\"" + reportPath.getFileName().toString() + "\"")
                 .body(resource);
         } catch (Exception e) {
-            LOGGER.error("Error downloading diff report: {}", e.getMessage());
+            LOGGER.error("Error downloading mod file diff report: {}", e.getMessage());
             return ResponseEntity.internalServerError().build();
         }
     }

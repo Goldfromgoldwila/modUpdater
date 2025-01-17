@@ -1,45 +1,77 @@
 // Global downloadDiff function
 async function downloadDiff() {
     try {
+        console.log('Initiating file download...');  // Debug log
         const response = await fetch('https://modupdater.onrender.com/api/logs/download-diff', {
             method: 'GET',
             headers: {
-                'Accept': 'application/json',
+                'Accept': '*/*',
                 'Origin': 'https://goldfromgoldwila.github.io'
             },
             mode: 'cors',
-            credentials: 'omit'
+            credentials: 'omit',
+            // Add cache control and force HTTP/1.1
+            cache: 'no-cache',
+            redirect: 'follow',
+            referrerPolicy: 'no-referrer'
         });
         
         if (!response.ok) {
+            console.error('Download failed with status:', response.status);
             throw new Error(`Download failed: ${response.status}`);
         }
         
         const blob = await response.blob();
+        console.log('Received blob:', blob.size, 'bytes');
+        
         const filename = response.headers.get('content-disposition')
             ?.split('filename=')[1]?.replace(/"/g, '') || 'diff_report.txt';
             
+        console.log('Downloading with filename:', filename);
+        
+        // Create download link
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
+        a.style.display = 'none';
         a.href = url;
         a.download = filename;
+        
+        // Trigger download
         document.body.appendChild(a);
         a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
+        
+        // Cleanup with longer timeout
+        setTimeout(() => {
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        }, 1000);
+        
+        console.log('Download initiated successfully');
     } catch (error) {
-        console.error('Error downloading diff:', error);
-        alert('Failed to download diff file. Please try again later.');
+        console.error('Error during download:', error);
+        if (error.name === 'TypeError') {
+            console.error('Network error details:', error);
+            alert('Network error occurred. Please try again in a few moments.');
+        } else {
+            alert('Failed to download diff file. Please try again later.');
+        }
     }
 }
 
-// Add event listener to the button when DOM is loaded
+// Add event listener when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('Setting up download button listener');
     const downloadButton = document.getElementById('download-file');
     if (downloadButton) {
         downloadButton.addEventListener('click', downloadDiff);
+        console.log('Download button listener attached');
+    } else {
+        console.error('Download button not found in DOM');
     }
-    // Get DOM elements with null checks
+});
+
+// Add event listener to the button when DOM is loaded
+document.addEventListener('DOMContentLoaded', function() {
     const dropZone = document.getElementById('drop-zone');
     const fileInput = document.getElementById('file-input');
     const uploadButton = document.getElementById('upload-button');
@@ -311,3 +343,44 @@ document.getElementById('upload-button').addEventListener('click', async () => {
     // After successful upload, wait a bit for processing and fetch the diff
     setTimeout(fetchLatestDiff, 2000);
 });
+
+async function downloadModFileDiff() {
+    try {
+        console.log('Initiating mod file diff download...');
+        const response = await fetch('https://modupdater.onrender.com/api/logs/mod-file-diff', {
+            method: 'GET',
+            headers: {
+                'Accept': '*/*',
+                'Origin': 'https://goldfromgoldwila.github.io'
+            },
+            mode: 'cors',
+            credentials: 'omit'
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Download failed: ${response.status}`);
+        }
+        
+        const blob = await response.blob();
+        const filename = response.headers.get('content-disposition')
+            ?.split('filename=')[1]?.replace(/"/g, '') || 'mod_diff_report.txt';
+            
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        
+        setTimeout(() => {
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        }, 1000);
+        
+        console.log('Mod file diff download completed');
+    } catch (error) {
+        console.error('Error downloading mod file diff:', error);
+        alert('Failed to download mod file diff. Please try again later.');
+    }
+}
