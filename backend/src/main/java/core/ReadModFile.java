@@ -20,6 +20,10 @@ import java.util.stream.Stream;
 import java.util.Set;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Component
 public class ReadModFile {
@@ -45,6 +49,9 @@ public class ReadModFile {
         // Manifest
         ".mf"
     );
+    private static final Set<String> MISSING_DEPENDENCIES = new HashSet<>();
+    private static final Pattern DECOMPILER_HEADER_PATTERN = Pattern.compile(
+        "(?s)/\\*.*?Could not load the following classes:(.*?)\\*/");
 
     @EventListener
     public void handleDecompilationComplete(DecompilationCompleteEvent event) {
@@ -125,6 +132,14 @@ public class ReadModFile {
             writer.println("Total Files: " + modFiles.size());
             writer.println("\n=== File Details ===\n");
 
+            // Add dependency analysis section
+            writer.println("\n=== Dependency Analysis ===");
+            if (!MISSING_DEPENDENCIES.isEmpty()) {
+                writer.println("\nMissing Dependencies:");
+                MISSING_DEPENDENCIES.forEach(dep -> writer.println("- " + dep));
+                writer.println("\nNote: These dependencies are required but were not found during decompilation.");
+            }
+
             // Group files by type
             Map<String, List<ModFile>> filesByType = modFiles.stream()
                 .collect(Collectors.groupingBy(ModFile::getType));
@@ -137,10 +152,7 @@ public class ReadModFile {
                     writer.println("Size: " + formatFileSize(file.getSize()));
                     
                     if (file.getContent() != null) {
-                        writer.println("\nContent:");
-                        writer.println("----------------------------------------");
-                        writer.println(file.getContent());
-                        writer.println("----------------------------------------");
+                        processDecompiledContent(file, writer);
                     }
                     writer.println();
                 });
@@ -203,5 +215,29 @@ public class ReadModFile {
         if (fileName.endsWith(".mf") || fileName.contains("manifest")) return "manifest";
         
         return "other";
+    }
+
+    private void processDecompiledContent(ModFile modFile, PrintWriter writer) {
+        if (modFile.getContent() == null) return;
+        
+        // Check for decompiler warnings about missing classes
+        Matcher matcher = DECOMPILER_HEADER_PATTERN.matcher(modFile.getContent());
+        if (matcher.find()) {
+            String missingClasses = matcher.group(1).trim();
+            Arrays.stream(missingClasses.split("\n"))
+                .map(String::trim)
+                .filter(s -> s.startsWith("*"))
+                .map(s -> s.substring(1).trim())
+                .forEach(MISSING_DEPENDENCIES::add);
+            
+            writer.println("\nDecompilation Warnings:");
+            writer.println("Missing Dependencies:");
+            writer.println(missingClasses);
+        }
+        
+        writer.println("\nContent:");
+        writer.println("----------------------------------------");
+        writer.println(modFile.getContent());
+        writer.println("----------------------------------------");
     }
 }
