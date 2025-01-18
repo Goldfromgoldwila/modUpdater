@@ -24,6 +24,8 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
 @Component
 public class ReadModFile {
@@ -52,6 +54,15 @@ public class ReadModFile {
     private static final Set<String> MISSING_DEPENDENCIES = new HashSet<>();
     private static final Pattern DECOMPILER_HEADER_PATTERN = Pattern.compile(
         "(?s)/\\*.*?Could not load the following classes:(.*?)\\*/");
+    private static final Set<String> MAPPING_FILE_PATTERNS = Set.of(
+        "mappings.tiny",      // Tiny mappings format
+        "mcp_mappings.txt",   // MCP mappings
+        "srg.tsrg",          // TSRG format mappings
+        "yarn-mappings.jar", // Yarn mappings
+        "joined.srg",        // Forge SRG mappings
+        "mappings.json",     // Custom JSON mappings
+        "fabric.mod.json"    // Fabric mod metadata (contains mapping references)
+    );
 
     @EventListener
     public void handleDecompilationComplete(DecompilationCompleteEvent event) {
@@ -130,7 +141,9 @@ public class ReadModFile {
             writer.println("Generated: " + LocalDateTime.now());
             writer.println("Version: " + version);
             writer.println("Total Files: " + modFiles.size());
-            writer.println("\n=== File Details ===\n");
+
+            // Process mapping information
+            processMappingFiles(modFiles, writer);
 
             // Add dependency analysis section
             writer.println("\n=== Dependency Analysis ===");
@@ -239,5 +252,85 @@ public class ReadModFile {
         writer.println("----------------------------------------");
         writer.println(modFile.getContent());
         writer.println("----------------------------------------");
+    }
+
+    private void processMappingFiles(List<ModFile> modFiles, PrintWriter writer) {
+        writer.println("\n=== Mapping Information ===");
+        
+        // Find and process mapping files
+        List<ModFile> mappingFiles = modFiles.stream()
+            .filter(this::isMappingFile)
+            .collect(Collectors.toList());
+
+        if (mappingFiles.isEmpty()) {
+            writer.println("No explicit mapping files found.");
+            
+            // Check fabric.mod.json for mapping references
+            modFiles.stream()
+                .filter(file -> file.getName().equals("fabric.mod.json"))
+                .findFirst()
+                .ifPresent(fabricJson -> {
+                    try {
+                        JsonObject json = JsonParser.parseString(fabricJson.getContent()).getAsJsonObject();
+                        writer.println("\nFabric Mod Mapping References:");
+                        
+                        // Check for mapping references in fabric.mod.json
+                        if (json.has("depends")) {
+                            JsonObject depends = json.getAsJsonObject("depends");
+                            if (depends.has("yarn")) {
+                                writer.println("Yarn Mappings Version: " + depends.get("yarn").getAsString());
+                            }
+                            if (depends.has("intermediary")) {
+                                writer.println("Intermediary Mappings: " + depends.get("intermediary").getAsString());
+                            }
+                        }
+                    } catch (Exception e) {
+                        writer.println("Error parsing fabric.mod.json: " + e.getMessage());
+                    }
+                });
+            
+            // Check for Forge mods.toml
+            modFiles.stream()
+                .filter(file -> file.getName().equals("mods.toml"))
+                .findFirst()
+                .ifPresent(forgeToml -> {
+                    writer.println("\nForge Mod Mapping References:");
+                    writer.println("Content of mods.toml:");
+                    writer.println(forgeToml.getContent());
+                });
+            
+        } else {
+            writer.println("\nFound Mapping Files:");
+            for (ModFile mappingFile : mappingFiles) {
+                writer.println("\nFile: " + mappingFile.getName());
+                writer.println("Path: " + mappingFile.getPath());
+                writer.println("Size: " + formatFileSize(mappingFile.getSize()));
+                
+                if (mappingFile.getContent() != null) {
+                    writer.println("\nMapping Content Preview (first 1000 chars):");
+                    writer.println("----------------------------------------");
+                    String preview = mappingFile.getContent().length() > 1000 
+                        ? mappingFile.getContent().substring(0, 1000) + "..."
+                        : mappingFile.getContent();
+                    writer.println(preview);
+                    writer.println("----------------------------------------");
+                }
+            }
+        }
+        
+        // Check for mixin configurations which might contain mapping references
+        writer.println("\nMixin Configurations (may contain mapping references):");
+        modFiles.stream()
+            .filter(file -> file.getName().endsWith(".mixins.json"))
+            .forEach(mixinFile -> {
+                writer.println("\nMixin Config: " + mixinFile.getName());
+                writer.println("Content:");
+                writer.println(mixinFile.getContent());
+            });
+    }
+
+    private boolean isMappingFile(ModFile file) {
+        return MAPPING_FILE_PATTERNS.stream()
+            .anyMatch(pattern -> file.getName().toLowerCase().contains(pattern.toLowerCase()));
     }
 }
