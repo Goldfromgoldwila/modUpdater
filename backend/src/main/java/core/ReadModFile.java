@@ -62,6 +62,13 @@ public class ReadModFile {
 
     private void appendToVersionDiffFile(List<ModFile> modFiles, String version) throws IOException {
         Path diffDir = Paths.get(DIFF_OUTPUT_DIR);
+        
+        // Create directory if it doesn't exist
+        if (!Files.exists(diffDir)) {
+            Files.createDirectories(diffDir);
+            LOGGER.info("Created directory: {}", DIFF_OUTPUT_DIR);
+        }
+        
         String filePrefix = "diff_report_" + version;
         
         Path reportPath;
