@@ -1,21 +1,38 @@
 package core;
 
 public class ModFile {
-    private String name;
-    private String path;
-    private String type;
-    private long size;
+    private final String name;
+    private final String path;
+    private final String type;
+    private final long size;
+    private final String content;
 
-    public ModFile(String name, String path, String type, long size) {
+    public ModFile(String name, String path, String type, long size, String content) {
         this.name = name;
         this.path = path;
         this.type = type;
         this.size = size;
+        this.content = content;
     }
 
-    // Add getters and setters
-    public String getName() { return name; }
-    public String getPath() { return path; }
-    public String getType() { return type; }
-    public long getSize() { return size; }
+    // Add all required getters
+    public String getName() {
+        return name;
+    }
+
+    public String getPath() {
+        return path;
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public long getSize() {
+        return size;
+    }
+
+    public String getContent() {
+        return content;
+    }
 } 
