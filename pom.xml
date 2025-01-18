@@ -84,10 +84,11 @@
                 <version>${spring.boot.version}</version>
                 <configuration>
                     <mainClass>core.Main</mainClass>
-                    <layout>JAR</layout>
+                    <classifier>exec</classifier>
                 </configuration>
                 <executions>
                     <execution>
+                        <id>repackage</id>
                         <goals>
                             <goal>repackage</goal>
                         </goals>
@@ -95,5 +96,12 @@
                 </executions>
             </plugin>
         </plugins>
+        
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>true</filtering>
+            </resource>
+        </resources>
     </build>
 </project>
