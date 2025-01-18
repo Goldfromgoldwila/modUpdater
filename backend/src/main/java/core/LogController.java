@@ -85,6 +85,41 @@ public class LogController {
         }
     }
 
+    @GetMapping("/mod-file-diff")
+    public ResponseEntity<Resource> downloadModFileDiff() {
+        try {
+            Path diffDirPath = Paths.get(DIFF_DIR);
+            if (!Files.exists(diffDirPath)) {
+                LOGGER.error("Diff directory not found: {}", DIFF_DIR);
+                return ResponseEntity.notFound().build();
+            }
+
+            // Find the latest mod file diff report
+            Optional<Path> latestReport = Files.list(diffDirPath)
+                .filter(path -> path.getFileName().toString().startsWith("diff_report_mod"))
+                .max(Comparator.comparingLong(path -> path.toFile().lastModified()));
+
+            if (latestReport.isEmpty()) {
+                LOGGER.error("No mod file diff report found");
+                return ResponseEntity.notFound().build();
+            }
+
+            Path reportPath = latestReport.get();
+            Resource resource = new FileSystemResource(reportPath.toFile());
+
+            LOGGER.info("Serving mod file diff report: {}", reportPath);
+
+            return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_PLAIN)
+                .header(HttpHeaders.CONTENT_DISPOSITION, 
+                    "attachment; filename=\"" + reportPath.getFileName().toString() + "\"")
+                .body(resource);
+        } catch (Exception e) {
+            LOGGER.error("Error downloading mod file diff report: {}", e.getMessage());
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
     private File getLatestFile(String directory, String prefix) {
         try {
             File dir = new File(directory);
