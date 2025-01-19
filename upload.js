@@ -6,14 +6,10 @@ async function downloadDiff() {
             method: 'GET',
             headers: {
                 'Accept': '*/*',
-                'Origin': 'https://goldfromgoldwila.github.io'
+                'Origin': window.location.origin
             },
             mode: 'cors',
-            credentials: 'omit',
-            // Add cache control and force HTTP/1.1
-            cache: 'no-cache',
-            redirect: 'follow',
-            referrerPolicy: 'no-referrer'
+            credentials: 'omit'
         });
         
         if (!response.ok) {

@@ -36,7 +36,7 @@ public class ExtractJson {
     private VersionParser versionParser;
 
     private String targetVersion;
-    private String originalVersion;
+    private String originalVersion = "";
 
     public void processMod(String targetVersion) {
         this.targetVersion = targetVersion;
@@ -80,12 +80,14 @@ public class ExtractJson {
     }
 
     public String getOriginalVersion() {
-        return this.originalVersion;
+        return originalVersion != null ? originalVersion : "unknown";
     }
 
     private void processModJson(File modJsonFile) throws IOException {
         JsonObject modJson = readJsonFile(modJsonFile);
-        JsonObject depends = getOrCreateDependsObject(modJson);
+        JsonObject depends = modJson.has("depends") ? 
+            modJson.getAsJsonObject("depends") : 
+            new JsonObject();
         
         String currentVersion = depends.has("minecraft") ? 
             depends.get("minecraft").getAsString() : "";
@@ -93,16 +95,21 @@ public class ExtractJson {
         this.originalVersion = currentVersion;
         String cleanVersion = currentVersion.replaceAll("[>=<]", "").trim();
         
-        LOGGER.info("Original version: '{}' -> Clean version: '{}'", 
-            currentVersion, cleanVersion);
+        LOGGER.info("Original version: '{}' -> Clean version: '{}'", currentVersion, cleanVersion);
+        
+        if (cleanVersion.isEmpty()) {
+            LOGGER.warn("No Minecraft version found in mod.json");
+            cleanVersion = "unknown";
+        }
         
         versionHandler.setCleanVersion(cleanVersion);
         versionHandler.setMcVersion(this.targetVersion);
         
-        depends.addProperty("minecraft", this.targetVersion);
-        saveJsonFile(modJsonFile, modJson);
-        
-        LOGGER.info("Successfully processed mod.json with target version: {}", this.targetVersion);
+        if (depends.has("minecraft")) {
+            depends.addProperty("minecraft", this.targetVersion);
+            saveJsonFile(modJsonFile, modJson);
+            LOGGER.info("Updated minecraft version to: {}", this.targetVersion);
+        }
     }
 
     private JsonObject readJsonFile(File file) throws IOException {
@@ -115,12 +122,5 @@ public class ExtractJson {
         String content = new GsonBuilder().setPrettyPrinting().create().toJson(jsonObject);
         LOGGER.debug("Writing file content:\n{}", content);
         Files.writeString(file.toPath(), content);
-    }
-
-    private JsonObject getOrCreateDependsObject(JsonObject jsonObject) {
-        if (!jsonObject.has("depends")) {
-            jsonObject.add("depends", new JsonObject());
-        }
-        return jsonObject.getAsJsonObject("depends");
     }
 }

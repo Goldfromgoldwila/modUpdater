@@ -11,14 +11,13 @@ public class WebConfig implements WebMvcConfigurer {
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/**")
             .allowedOrigins(
-                "http://localhost:3000",
                 "http://localhost:5500",
-                "https://modupdater.onrender.com",
-                "https://goldfromgoldwila.github.io"  // Our website's origin
+                "http://127.0.0.1:5500",
+                "https://goldfromgoldwila.github.io"
             )
             .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
             .allowedHeaders("*")
-            .exposedHeaders("*")
+            .exposedHeaders("Content-Disposition")
             .allowCredentials(false)
             .maxAge(3600);
     }

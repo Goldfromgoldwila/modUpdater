@@ -50,7 +50,8 @@ public class UploadController {
             modDecompilerService.decompileLatestMod();
             
             // Get original version from mod.json
-            this.originalVersion = extractJson.getOriginalVersion();
+            String originalVersion = extractJson.getOriginalVersion();
+            this.originalVersion = originalVersion != null ? originalVersion : "unknown";
             logger.info("Original mod version: {}", this.originalVersion);
             
             // Process version update
@@ -68,12 +69,9 @@ public class UploadController {
                 "targetVersion", this.targetVersion
             ));
         } catch (Exception e) {
-            logger.error("Error processing upload: {}", e.getMessage(), e);
+            logger.error("Error processing upload: {}", e.getMessage());
             return ResponseEntity.internalServerError()
-                    .body(Map.of(
-                        "error", "Failed to process upload: " + e.getMessage(),
-                        "filename", file.getOriginalFilename()
-                    ));
+                    .body(Map.of("error", "Failed to process upload: " + e.getMessage()));
         }
     }
 

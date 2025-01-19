@@ -15,6 +15,14 @@ import org.springframework.http.HttpHeaders;
 
 @RestController
 @RequestMapping("/api/logs")
+@CrossOrigin(origins = {
+    "http://localhost:5500", 
+    "http://127.0.0.1:5500",
+    "https://goldfromgoldwila.github.io"
+}, 
+allowedHeaders = "*",
+exposedHeaders = {"Content-Disposition"},
+methods = {RequestMethod.GET, RequestMethod.POST, RequestMethod.OPTIONS})
 public class LogController {
     private static final Logger LOGGER = LoggerFactory.getLogger(LogController.class);
     private static final String LOG_DIR = "logs";
