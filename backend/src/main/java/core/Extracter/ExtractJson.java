@@ -126,7 +126,22 @@ public class ExtractJson {
                  BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
                 
                 JsonObject modJson = JsonParser.parseReader(reader).getAsJsonObject();
-                String mcVersion = modJson.get("minecraft").getAsString();
+                
+                // Get the depends object or create it if it doesn't exist
+                JsonObject depends = modJson.has("depends") ? 
+                    modJson.getAsJsonObject("depends") : 
+                    new JsonObject();
+                
+                // Get minecraft version from depends, or try root level if not found
+                String mcVersion;
+                if (depends.has("minecraft")) {
+                    mcVersion = depends.get("minecraft").getAsString();
+                } else if (modJson.has("minecraft")) {
+                    mcVersion = modJson.get("minecraft").getAsString();
+                } else {
+                    LOGGER.error("No Minecraft version found in mod.json");
+                    return;
+                }
                 
                 String cleanVersion = versionParser.parseVersion(mcVersion);
                 LOGGER.info("Extracted Minecraft version: {}", cleanVersion);
