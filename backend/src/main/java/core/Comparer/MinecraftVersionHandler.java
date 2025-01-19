@@ -273,7 +273,7 @@ public class MinecraftVersionHandler implements VersionHandlerService {
             throw new RuntimeException("Failed to process mod", e);
         }
     }
-
+ 
     // Getters and setters remain the same
     public String getCleanVersion() {
         return cleanVersion;
