@@ -12,6 +12,13 @@ import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 import org.springframework.context.event.EventListener;
 import core.event.AnalysisReadyEvent;
+import core.MinecraftVersionHandler;
+import core.ReadModFile;
+import core.analysis.model.*;
+import core.analysis.exception.AnalysisException;
+import java.io.PrintWriter;
+import java.io.IOException;
+import java.time.LocalDateTime;
 
 @Service
 public class ModChangeAnalyzer {
@@ -39,21 +46,10 @@ public class ModChangeAnalyzer {
     public CompletableFuture<AnalysisResult> analyzeModChanges(Path modReportPath, Path mcVersionReportPath) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                // Parallel analysis of mod and MC changes
-                CompletableFuture<ModAnalysis> modAnalysisFuture = 
-                    CompletableFuture.supplyAsync(() -> analyzeModStructure(modReportPath));
-                    
-                CompletableFuture<McVersionChanges> mcChangesFuture = 
-                    CompletableFuture.supplyAsync(() -> analyzeMcChanges(mcVersionReportPath));
-
-                // Wait for both analyses to complete
-                ModAnalysis modAnalysis = modAnalysisFuture.get();
-                McVersionChanges mcChanges = mcChangesFuture.get();
-
-                // Analyze impacts
+                ModAnalysis modAnalysis = analyzeModStructure(modReportPath);
+                McVersionChanges mcChanges = analyzeMcChanges(mcVersionReportPath);
                 Set<ImpactedComponent> impacts = impactAnalyzer.analyzeImpacts(modAnalysis, mcChanges);
                 
-                // Generate comprehensive report
                 AnalysisResult result = new AnalysisResult(modAnalysis, mcChanges, impacts);
                 generateDetailedReport(result);
                 
@@ -63,6 +59,36 @@ public class ModChangeAnalyzer {
                 throw new AnalysisException("Failed to complete analysis", e);
             }
         });
+    }
+
+    private void generateDetailedReport(AnalysisResult result) throws IOException {
+        Path reportPath = Paths.get("analysis_results", 
+            "detailed_impact_report_" + System.currentTimeMillis() + ".md");
+        Files.createDirectories(reportPath.getParent());
+        
+        try (PrintWriter writer = new PrintWriter(Files.newBufferedWriter(reportPath))) {
+            writer.println("# Detailed Mod Impact Analysis Report");
+            writer.println("Generated: " + LocalDateTime.now());
+            
+            // Write mod analysis
+            writer.println("\n## Mod Analysis");
+            writer.println("Dependencies found: " + result.getModAnalysis().getDependencies().size());
+            
+            // Write MC changes
+            writer.println("\n## Minecraft Changes");
+            writer.println("Total changes: " + result.getMcChanges().getChanges().size());
+            
+            // Write impacts
+            writer.println("\n## Impact Analysis");
+            result.getImpacts().forEach(impact -> {
+                writer.println("\n### " + impact.getName());
+                writer.println("Type: " + impact.getType());
+                writer.println("Impact Score: " + impact.getImpactScore());
+                writer.println("Affected Dependencies:");
+                impact.getAffectedDependencies().forEach(dep -> 
+                    writer.println("- " + dep));
+            });
+        }
     }
 
     private ModAnalysis analyzeModStructure(Path modReportPath) {
