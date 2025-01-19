@@ -6,9 +6,11 @@ core\Extracter\ExtractJson.class
 core\Api\ConvertController.class
 core\WebConfig.class
 core\Event\DecompilationCompleteEvent.class
+core\Comparer\VersionHandlerService.class
 core\ModFile\ReadModFile.class
 core\Comparer\MinecraftVersionHandler.class
 core\HealthController.class
 core\Main.class
 core\ModFile\ModFile$ModFileBuilder.class
 core\LogController.class
+core\Event\AnalysisReadyEvent.class

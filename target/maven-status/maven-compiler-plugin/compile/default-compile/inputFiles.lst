@@ -1,4 +1,6 @@
 C:\Users\Aryan K\Desktop\minecraftmodupdater\backend\src\main\java\core\Decompiler\ModDecompilerService.java
+C:\Users\Aryan K\Desktop\minecraftmodupdater\backend\src\main\java\core\Comparer\VersionHandlerService.java
+C:\Users\Aryan K\Desktop\minecraftmodupdater\backend\src\main\java\core\event\AnalysisReadyEvent.java
 C:\Users\Aryan K\Desktop\minecraftmodupdater\backend\src\main\java\core\Main.java
 C:\Users\Aryan K\Desktop\minecraftmodupdater\backend\src\main\java\core\Api\WebConfig.java
 C:\Users\Aryan K\Desktop\minecraftmodupdater\backend\src\main\java\core\Api\UploadController.java
@@ -9,5 +11,5 @@ C:\Users\Aryan K\Desktop\minecraftmodupdater\backend\src\main\java\core\ModFile\
 C:\Users\Aryan K\Desktop\minecraftmodupdater\backend\src\main\java\core\Api\ConvertController.java
 C:\Users\Aryan K\Desktop\minecraftmodupdater\backend\src\main\java\core\ModFile\ModFile.java
 C:\Users\Aryan K\Desktop\minecraftmodupdater\backend\src\main\java\core\Extracter\VersionParser.java
-C:\Users\Aryan K\Desktop\minecraftmodupdater\backend\src\main\java\core\Event\DecompilationCompleteEvent.java
+C:\Users\Aryan K\Desktop\minecraftmodupdater\backend\src\main\java\core\event\DecompilationCompleteEvent.java
 C:\Users\Aryan K\Desktop\minecraftmodupdater\backend\src\main\java\core\Extracter\ExtractJson.java

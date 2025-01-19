@@ -16,10 +16,9 @@ import org.springframework.web.bind.annotation.*;
 import java.io.*;
 import java.nio.file.*;
 import java.util.*;
-import core.Comparer.MinecraftVersionHandler;
 import org.springframework.beans.factory.annotation.Autowired;
+import core.Comparer.VersionHandlerService;
 import java.util.zip.*;
-import com.google.gson.JsonSyntaxException;
 
 @Component
 @RestController
@@ -30,14 +29,11 @@ public class ExtractJson {
     private static final String DECOMPILED_DIR = "decompiled_mods";
     private static final String MOD_JSON_FILE = "fabric.mod.json";
 
-    private final MinecraftVersionHandler versionHandler;
-    private final VersionParser versionParser;
+    @Autowired
+    private VersionHandlerService versionHandler;
     
     @Autowired
-    public ExtractJson(MinecraftVersionHandler versionHandler, VersionParser versionParser) {
-        this.versionHandler = versionHandler;
-        this.versionParser = versionParser;
-    }
+    private VersionParser versionParser;
 
     public void processMod(String targetVersion) {
         try {
@@ -64,7 +60,7 @@ public class ExtractJson {
                 depends.get("minecraft").getAsString() : "";
             
             // Clean the version - will take the more detailed version if multiple exist
-            String cleanVersion = versionParser.parseVersion(currentVersion);
+            String cleanVersion = versionParser.cleanVersion(currentVersion);
             LOGGER.info("Original version: '{}' -> Clean version: '{}'", 
                 currentVersion, cleanVersion);
             
@@ -83,6 +79,7 @@ public class ExtractJson {
             versionHandler.setCleanVersion(cleanVersion);
             versionHandler.setMcVersion(targetVersion);
             versionHandler.compareVersions(cleanVersion, targetVersion);
+            LOGGER.info("Calling version handler with clean version: {} and mc version: {}", cleanVersion, targetVersion);
 
 
         } catch (Exception e) {
@@ -143,14 +140,14 @@ public class ExtractJson {
                     return;
                 }
                 
-                String cleanVersion = versionParser.parseVersion(mcVersion);
+                String cleanVersion = mcVersion.replaceAll("[>=<]", "").trim();
                 LOGGER.info("Extracted Minecraft version: {}", cleanVersion);
                 
-                // Trigger version handling
-                versionHandler.processMod(cleanVersion);
+                // Set versions in version handler
+                versionHandler.setCleanVersion(cleanVersion);
+                versionHandler.setMcVersion(mcVersion);
                 
-            } catch (JsonSyntaxException e) {
-                LOGGER.error("Error parsing mod.json: {}", e.getMessage());
+                LOGGER.info("Successfully processed mod.json");
             }
         } catch (IOException e) {
             LOGGER.error("Error processing mod.json: {}", e.getMessage());

@@ -3,6 +3,7 @@ package core.Comparer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
 import jakarta.annotation.PostConstruct;
 import java.io.*;
 import java.nio.file.*;
@@ -10,9 +11,10 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import org.springframework.beans.factory.annotation.Autowired;
 
-@Component
-public class MinecraftVersionHandler {
+@Service
+public class MinecraftVersionHandler implements VersionHandlerService {
     private static final Logger LOGGER = LoggerFactory.getLogger(MinecraftVersionHandler.class);
     private static final String DECOMPILED_DIR = "versions";
     private static final String DIFF_OUTPUT_DIR = "diff_results";
@@ -253,17 +255,14 @@ public class MinecraftVersionHandler {
         LOGGER.info("\n=== Detailed File Changes ===");
     }
 
+    @Override
     public void processMod(String mcVersion) {
         try {
             this.mcVersion = mcVersion;
             this.cleanVersion = mcVersion.replaceAll("[>=<]", "").trim();
             
             LOGGER.info("Processing mod for Minecraft version: {}", cleanVersion);
-            
-            // Create necessary directories
             createRequiredDirectories();
-            
-            // Compare versions
             compareVersions(cleanVersion, mcVersion);
             
             LOGGER.info("Mod processing completed successfully");
