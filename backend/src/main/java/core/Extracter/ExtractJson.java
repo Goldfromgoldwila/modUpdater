@@ -37,6 +37,7 @@ public class ExtractJson {
 
     private String targetVersion;
     private String originalVersion = "";
+    private String cleanVersion = "";
 
     public void processMod(String targetVersion) {
         this.targetVersion = targetVersion;
@@ -83,6 +84,10 @@ public class ExtractJson {
         return originalVersion != null ? originalVersion : "unknown";
     }
 
+    public String getCleanVersion() {
+        return cleanVersion != null ? cleanVersion : "unknown";
+    }
+
     private void processModJson(File modJsonFile) throws IOException {
         JsonObject modJson = readJsonFile(modJsonFile);
         JsonObject depends = modJson.has("depends") ? 
@@ -93,23 +98,24 @@ public class ExtractJson {
             depends.get("minecraft").getAsString() : "";
         
         this.originalVersion = currentVersion;
-        String cleanVersion = currentVersion.replaceAll("[>=<]", "").trim();
+        this.cleanVersion = currentVersion.replaceAll("[>=<]", "").trim();
         
-        LOGGER.info("Original version: '{}' -> Clean version: '{}'", currentVersion, cleanVersion);
+        LOGGER.info("Original version: '{}' -> Clean version: '{}'", 
+            currentVersion, this.cleanVersion);
         
-        if (cleanVersion.isEmpty()) {
+        if (this.cleanVersion.isEmpty()) {
             LOGGER.warn("No Minecraft version found in mod.json");
-            cleanVersion = "unknown";
+            this.cleanVersion = "unknown";
         }
-        
-        versionHandler.setCleanVersion(cleanVersion);
+
+        // Set versions in handler and trigger comparison
+        versionHandler.setCleanVersion(this.cleanVersion);
         versionHandler.setMcVersion(this.targetVersion);
+        versionHandler.compareVersions(this.cleanVersion, this.targetVersion);
         
-        if (depends.has("minecraft")) {
-            depends.addProperty("minecraft", this.targetVersion);
-            saveJsonFile(modJsonFile, modJson);
-            LOGGER.info("Updated minecraft version to: {}", this.targetVersion);
-        }
+        // Update the version in the JSON
+        depends.addProperty("minecraft", this.targetVersion);
+        saveJsonFile(modJsonFile, modJson);
     }
 
     private JsonObject readJsonFile(File file) throws IOException {

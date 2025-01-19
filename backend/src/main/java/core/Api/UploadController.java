@@ -49,13 +49,10 @@ public class UploadController {
             // Decompile and process
             modDecompilerService.decompileLatestMod();
             
-            // Get original version from mod.json
-            String originalVersion = extractJson.getOriginalVersion();
-            this.originalVersion = originalVersion != null ? originalVersion : "unknown";
-            logger.info("Original mod version: {}", this.originalVersion);
-            
-            // Process version update
+            // Process version update and get clean version
             extractJson.processMod(targetVersion);
+            String cleanVersion = extractJson.getCleanVersion();
+            this.originalVersion = cleanVersion != null ? cleanVersion : "unknown";
             
             logger.info("=== Mod Processing Summary ===");
             logger.info("File: {}", this.fileName);
