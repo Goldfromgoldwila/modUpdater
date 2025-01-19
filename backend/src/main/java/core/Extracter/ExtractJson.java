@@ -122,17 +122,8 @@ public class ExtractJson {
             try (InputStream inputStream = zipFile.getInputStream(jsonEntry);
                  BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
                 
-                // Read the entire JSON content
-                StringBuilder jsonContent = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    jsonContent.append(line).append("\n");
-                }
-                
-                // Log the original JSON content
-                LOGGER.info("=== Original fabric.mod.json Content ===\n{}", jsonContent.toString());
-                
-                JsonObject modJson = JsonParser.parseString(jsonContent.toString()).getAsJsonObject();
+                // Read and parse JSON content
+                JsonObject modJson = JsonParser.parseReader(reader).getAsJsonObject();
                 JsonObject depends = modJson.has("depends") ? 
                     modJson.getAsJsonObject("depends") : 
                     new JsonObject();
@@ -153,12 +144,9 @@ public class ExtractJson {
                 String cleanVersion = currentVersion.replaceAll("[>=<]", "").trim();
                 LOGGER.info("Original version: {} -> Clean version: {}", currentVersion, cleanVersion);
                 
-                // Set versions in version handler - use clean version for both initially
+                // Set versions in version handler
                 versionHandler.setCleanVersion(cleanVersion);
-                versionHandler.setMcVersion(cleanVersion);  // Set original version first
-                
-                // Process the mod with version handler
-                versionHandler.processMod(cleanVersion);
+                // Don't set mcVersion here - it will be set by MinecraftVersionHandler
                 
                 LOGGER.info("Successfully processed mod.json");
             }

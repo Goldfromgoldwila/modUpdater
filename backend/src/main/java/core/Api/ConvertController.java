@@ -7,6 +7,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import core.Comparer.MinecraftVersionHandler;
+import core.Extracter.ExtractJson;
 
 import java.util.Map;
 
@@ -17,20 +18,26 @@ public class ConvertController {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ConvertController.class);
     private final MinecraftVersionHandler minecraftVersionHandler;
+    private final ExtractJson extractJson;
 
     @Autowired
-    public ConvertController(MinecraftVersionHandler minecraftVersionHandler) {
+    public ConvertController(MinecraftVersionHandler minecraftVersionHandler, ExtractJson extractJson) {
         this.minecraftVersionHandler = minecraftVersionHandler;
+        this.extractJson = extractJson;
     }
 
     @PostMapping("/convert")
     public ResponseEntity<?> convertVersion(@RequestBody Map<String, String> payload) {
-        String mcVersion = payload.get("version");
-        LOGGER.info("Received conversion request for version: {}", mcVersion);
+        String targetVersion = payload.get("version");
+        LOGGER.info("Received conversion request for version: {}", targetVersion);
 
         try {
-            minecraftVersionHandler.processMod(mcVersion);
-            LOGGER.info("Conversion successful for version: {}", mcVersion);
+            // First process the mod.json to get original version
+            extractJson.processMod(targetVersion);  // Pass the target version
+            
+            // Then process the conversion
+            minecraftVersionHandler.processMod(targetVersion);
+            LOGGER.info("Conversion successful for version: {}", targetVersion);
             return ResponseEntity.ok(Map.of("message", "Conversion completed successfully!"));
         } catch (Exception e) {
             LOGGER.error("Error during conversion: {}", e.getMessage(), e);
