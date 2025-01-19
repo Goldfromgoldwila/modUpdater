@@ -128,6 +128,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    let modCounter = parseInt(localStorage.getItem('modCounter') || '0');
+    
+    function getNextModName() {
+        modCounter++;
+        localStorage.setItem('modCounter', modCounter.toString());
+        return `mod${modCounter}.jar`;
+    }
+
+    function saveModMapping(originalName, modName) {
+        const mappings = JSON.parse(localStorage.getItem('modMappings') || '{}');
+        mappings[modName] = originalName;
+        localStorage.setItem('modMappings', JSON.stringify(mappings));
+    }
+
     uploadButton.addEventListener('click', async () => {
         try {
             if (!fileInput.files.length) {
@@ -139,15 +153,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error('Please select a version');
             }
 
+            const originalFile = fileInput.files[0];
+            const newModName = getNextModName();
+            const renamedFile = new File([originalFile], newModName, {
+                type: originalFile.type
+            });
+
+            // Save mapping of original name to new name
+            saveModMapping(originalFile.name, newModName);
+
             progressBar.style.display = 'block';
             progressBar.value = 25;
             progressText.textContent = 'Uploading...';
 
             const formData = new FormData();
-            formData.append('file', fileInput.files[0]);
+            formData.append('file', renamedFile);
             formData.append('targetVersion', selectedVersion);
 
-            console.log('Uploading file and target version:', selectedVersion);
+            console.log('Uploading file:', {
+                originalName: originalFile.name,
+                newName: newModName,
+                targetVersion: selectedVersion
+            });
             
             const uploadResponse = await fetch("https://modupdater.onrender.com/api/upload", {
                 method: "POST",

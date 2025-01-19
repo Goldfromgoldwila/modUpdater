@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import core.Extracter.ExtractJson;
 import core.Event.DecompilationCompleteEvent;
 import org.springframework.web.multipart.MultipartFile;
+import core.Config.DirectoryConfig;
 
 import java.io.*;
 import java.nio.file.*;
@@ -24,12 +25,15 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.stream.Stream;
 import jakarta.annotation.PreDestroy;
+import java.util.Optional;
+import java.util.Comparator;
 
 @Service
 public class ModDecompilerService {
     private static final Logger logger = LoggerFactory.getLogger(ModDecompilerService.class);
-    private static final String UPLOAD_DIR = "uploaded_mods";
-    private static final String DECOMPILED_DIR = "decompiled_mods";
+    private static final String BASE_DIR = "mods_storage";
+    private static final String UPLOAD_DIR = BASE_DIR + "/uploaded_mods";
+    private static final String DECOMPILED_DIR = BASE_DIR + "/decompiled_mods";
     private static final Pattern VERSION_PATTERN = Pattern.compile("_(\\d+)\\.");
     private static final int BUFFER_SIZE = 8192;
     private static final int THREAD_POOL_SIZE = Runtime.getRuntime().availableProcessors();
@@ -44,15 +48,26 @@ public class ModDecompilerService {
     @Autowired
     private ExtractJson extractJson;
 
+    public ModDecompilerService() {
+        createRequiredDirectories();
+    }
+
+    private void createRequiredDirectories() {
+        try {
+            Files.createDirectories(Paths.get(DirectoryConfig.BASE_DIR));
+            Files.createDirectories(Paths.get(DirectoryConfig.UPLOAD_DIR));
+            Files.createDirectories(Paths.get(DirectoryConfig.DECOMPILED_DIR));
+            logger.info("Created required directories: {}, {}", 
+                DirectoryConfig.UPLOAD_DIR, DirectoryConfig.DECOMPILED_DIR);
+        } catch (IOException e) {
+            logger.error("Failed to create directories: {}", e.getMessage());
+            throw new RuntimeException("Failed to create required directories", e);
+        }
+    }
+
     public void decompileLatestMod() {
         try {
-            Path uploadDir = Paths.get(UPLOAD_DIR);
-            if (!Files.exists(uploadDir)) {
-                logger.error("Upload directory does not exist");
-                return;
-            }
-
-            // Get the latest uploaded mod file
+            Path uploadDir = Paths.get(DirectoryConfig.UPLOAD_DIR);
             Optional<Path> latestMod = Files.list(uploadDir)
                 .filter(path -> path.toString().endsWith(".jar"))
                 .max(Comparator.comparingLong(path -> {
@@ -65,24 +80,17 @@ public class ModDecompilerService {
 
             if (latestMod.isPresent()) {
                 Path modPath = latestMod.get();
-                logger.info("Decompiling latest mod: {}", modPath.getFileName());
-                
-                // Decompile the mod
                 decompileMod(modPath);
-                
-                // Extract and process mod.json
-                extractJson.processModJson(modPath);
-                
-                // Publish decompilation complete event
-                eventPublisher.publishEvent(new DecompilationCompleteEvent(this, modPath));
-                
-                logger.info("Decompilation and extraction completed successfully");
+                // Create Path for decompiled directory
+                Path decompiledPath = Paths.get(DirectoryConfig.DECOMPILED_DIR, 
+                    modPath.getFileName().toString().replace(".jar", ""));
+                eventPublisher.publishEvent(new DecompilationCompleteEvent(this, decompiledPath));
             } else {
-                logger.warn("No mod files found in upload directory");
+                logger.error("No mod file found to decompile");
             }
         } catch (IOException e) {
-            logger.error("Error during decompilation: {}", e.getMessage());
-            throw new RuntimeException("Decompilation failed", e);
+            logger.error("Error decompiling latest mod: {}", e.getMessage());
+            throw new RuntimeException("Failed to decompile latest mod", e);
         }
     }
 
@@ -247,13 +255,12 @@ public class ModDecompilerService {
     private void decompileMod(Path modPath) {
         try {
             String fileName = modPath.getFileName().toString();
-            Path outputDir = Paths.get(DECOMPILED_DIR, fileName.replace(".jar", ""));
+            Path outputDir = Paths.get(DirectoryConfig.DECOMPILED_DIR, fileName.replace(".jar", ""));
             
             if (!Files.exists(outputDir)) {
                 Files.createDirectories(outputDir);
             }
 
-            // Extract jar contents
             try (ZipInputStream zis = new ZipInputStream(Files.newInputStream(modPath))) {
                 ZipEntry entry;
                 while ((entry = zis.getNextEntry()) != null) {
@@ -267,7 +274,6 @@ public class ModDecompilerService {
                     }
                 }
             }
-
             logger.info("Decompiled mod to: {}", outputDir);
         } catch (IOException e) {
             logger.error("Error decompiling mod: {}", e.getMessage());
@@ -277,22 +283,17 @@ public class ModDecompilerService {
 
     public void handleFileUpload(MultipartFile file) {
         try {
-            // Create upload directory if it doesn't exist
-            Path uploadDir = Paths.get(UPLOAD_DIR);
-            if (!Files.exists(uploadDir)) {
-                Files.createDirectories(uploadDir);
+            this.currentModName = file.getOriginalFilename();
+            Path filePath = Paths.get(DirectoryConfig.UPLOAD_DIR, this.currentModName);
+            
+            // Create the file if it doesn't exist
+            if (!Files.exists(filePath)) {
+                Files.createFile(filePath);
             }
-
-            // Generate unique filename with timestamp
-            String timestamp = String.valueOf(System.currentTimeMillis());
-            String fileName = "mod" + timestamp + ".jar";
-            Path filePath = uploadDir.resolve(fileName);
 
             // Save the uploaded file
             file.transferTo(filePath.toFile());
-            this.currentModName = fileName;
-            
-            logger.info("Uploaded mod: {}", fileName);
+            logger.info("Successfully uploaded mod: {} to {}", this.currentModName, filePath);
         } catch (IOException e) {
             logger.error("Error handling file upload: {}", e.getMessage());
             throw new RuntimeException("Failed to handle file upload", e);

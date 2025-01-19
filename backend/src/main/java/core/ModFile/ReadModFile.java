@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.context.event.EventListener;
 import core.Event.DecompilationCompleteEvent;
+import core.Config.DirectoryConfig;
 
 import java.io.FileWriter;
 import java.io.IOException;
@@ -66,16 +67,16 @@ public class ReadModFile {
 
     @EventListener
     public void handleDecompilationComplete(DecompilationCompleteEvent event) {
-        LOGGER.info("Received decompilation complete event for mod: {}", event.getModName());
-        scanModFiles(event.getModName());
+        Path modPath = event.getModPath();
+        LOGGER.info("Received decompilation complete event for mod: {}", modPath.getFileName());
+        scanModFiles(modPath);
     }
 
-    public List<ModFile> scanModFiles(String version) {
+    public List<ModFile> scanModFiles(Path modPath) {
         List<ModFile> modFiles = new ArrayList<>();
-        Path decompiledPath = Paths.get("decompiled_mods", version);
         
         try {
-            Files.walk(decompiledPath)
+            Files.walk(modPath)
                 .filter(Files::isRegularFile)
                 .forEach(path -> {
                     try {
@@ -97,8 +98,8 @@ public class ReadModFile {
                     }
                 });
 
-            appendToVersionDiffFile(modFiles, version);
-            LOGGER.info("Scanned {} files from mod: {}", modFiles.size(), version);
+            appendToVersionDiffFile(modFiles, modPath.getFileName().toString());
+            LOGGER.info("Scanned {} files from mod: {}", modFiles.size(), modPath.getFileName());
             return modFiles;
         } catch (IOException e) {
             LOGGER.error("Error scanning mod files: {}", e.getMessage());

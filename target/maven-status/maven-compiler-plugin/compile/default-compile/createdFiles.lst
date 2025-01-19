@@ -11,4 +11,5 @@ core\ModFile\ReadModFile.class
 core\Comparer\MinecraftVersionHandler.class
 core\Main.class
 core\ModFile\ModFile$ModFileBuilder.class
+core\Config\DirectoryConfig.class
 Api\WebConfig.class

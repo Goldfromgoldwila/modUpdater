@@ -19,6 +19,7 @@ import java.util.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import core.Comparer.VersionHandlerService;
 import java.util.zip.*;
+import core.Config.DirectoryConfig;
 
 @Component
 @RestController
@@ -26,7 +27,6 @@ import java.util.zip.*;
 @CrossOrigin(origins = {"https://goldfromgoldwila.github.io", "https://modupdater.onrender.com"})
 public class ExtractJson {
     private static final Logger LOGGER = LoggerFactory.getLogger(ExtractJson.class);
-    private static final String DECOMPILED_DIR = "decompiled_mods";
     private static final String MOD_JSON_FILE = "fabric.mod.json";
 
     @Autowired
@@ -53,65 +53,21 @@ public class ExtractJson {
                 throw new IllegalStateException("Mod JSON file not found");
             }
 
-            JsonObject modJson = readJsonFile(modJsonFile);
-            JsonObject depends = getOrCreateDependsObject(modJson);
+            processModJson(modJsonFile);
             
-            String currentVersion = depends.has("minecraft") ? 
-                depends.get("minecraft").getAsString() : "";
-            
-            String cleanVersion = currentVersion.replaceAll("[>=<]", "").trim();
-            LOGGER.info("Original version: '{}' -> Clean version: '{}'", 
-                currentVersion, cleanVersion);
-            
-            // Set versions in version handler
-            versionHandler.setCleanVersion(cleanVersion);
-            versionHandler.setMcVersion(this.targetVersion);
-            
-            // Update mod.json with target version
-            depends.addProperty("minecraft", this.targetVersion);
-            saveJsonFile(modJsonFile, modJson);
-            
-            LOGGER.info("Successfully processed mod.json with target version: {}", this.targetVersion);
         } catch (Exception e) {
             LOGGER.error("Mod processing failed: {}", e.getMessage());
             throw new RuntimeException("Mod processing failed", e);
         }
     }
 
-    public void processModJson(Path modPath) {
-        LOGGER.info("Processing mod.json from {}", modPath);
-        try (ZipFile zipFile = new ZipFile(modPath.toFile())) {
-            ZipEntry jsonEntry = zipFile.getEntry(MOD_JSON_FILE);
-            if (jsonEntry == null) {
-                LOGGER.error("No fabric.mod.json found in mod file");
-                return;
-            }
-
-            try (InputStream inputStream = zipFile.getInputStream(jsonEntry);
-                 BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
-                JsonObject modJson = JsonParser.parseReader(reader).getAsJsonObject();
-                JsonObject depends = modJson.has("depends") ? 
-                    modJson.getAsJsonObject("depends") : 
-                    new JsonObject();
-                
-                String currentVersion = depends.has("minecraft") ? 
-                    depends.get("minecraft").getAsString() : "";
-                
-                this.originalVersion = currentVersion;  // Store the original version
-                String cleanVersion = currentVersion.replaceAll("[>=<]", "").trim();
-                LOGGER.info("Found original version: {} (clean: {})", currentVersion, cleanVersion);
-                
-                versionHandler.setCleanVersion(cleanVersion);
-            }
-        } catch (IOException e) {
-            LOGGER.error("Error processing mod.json: {}", e.getMessage());
-            throw new RuntimeException("Failed to process mod.json", e);
-        }
-    }
-
     private File findLatestModDirectory() {
         try {
-            Path decompiledDirPath = Paths.get(DECOMPILED_DIR);
+            Path decompiledDirPath = Paths.get(DirectoryConfig.DECOMPILED_DIR);
+            if (!Files.exists(decompiledDirPath)) {
+                Files.createDirectories(decompiledDirPath);
+            }
+            
             return Files.list(decompiledDirPath)
                     .filter(Files::isDirectory)
                     .max(Comparator.comparingLong(path -> path.toFile().lastModified()))
@@ -121,6 +77,32 @@ public class ExtractJson {
             LOGGER.error("Error finding mod directory: {}", e.getMessage());
             return null;
         }
+    }
+
+    public String getOriginalVersion() {
+        return this.originalVersion;
+    }
+
+    private void processModJson(File modJsonFile) throws IOException {
+        JsonObject modJson = readJsonFile(modJsonFile);
+        JsonObject depends = getOrCreateDependsObject(modJson);
+        
+        String currentVersion = depends.has("minecraft") ? 
+            depends.get("minecraft").getAsString() : "";
+        
+        this.originalVersion = currentVersion;
+        String cleanVersion = currentVersion.replaceAll("[>=<]", "").trim();
+        
+        LOGGER.info("Original version: '{}' -> Clean version: '{}'", 
+            currentVersion, cleanVersion);
+        
+        versionHandler.setCleanVersion(cleanVersion);
+        versionHandler.setMcVersion(this.targetVersion);
+        
+        depends.addProperty("minecraft", this.targetVersion);
+        saveJsonFile(modJsonFile, modJson);
+        
+        LOGGER.info("Successfully processed mod.json with target version: {}", this.targetVersion);
     }
 
     private JsonObject readJsonFile(File file) throws IOException {
@@ -140,9 +122,5 @@ public class ExtractJson {
             jsonObject.add("depends", new JsonObject());
         }
         return jsonObject.getAsJsonObject("depends");
-    }
-
-    public String getOriginalVersion() {
-        return originalVersion;
     }
 }
