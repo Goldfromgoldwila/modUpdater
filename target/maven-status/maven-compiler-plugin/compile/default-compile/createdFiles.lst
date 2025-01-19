@@ -13,4 +13,3 @@ core\Comparer\MinecraftVersionHandler.class
 core\Main.class
 core\ModFile\ModFile$ModFileBuilder.class
 Api\WebConfig.class
-core\Event\AnalysisReadyEvent.class
