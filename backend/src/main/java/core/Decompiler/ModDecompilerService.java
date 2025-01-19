@@ -54,11 +54,21 @@ public class ModDecompilerService {
 
     private void createRequiredDirectories() {
         try {
-            Files.createDirectories(Paths.get(DirectoryConfig.BASE_DIR));
-            Files.createDirectories(Paths.get(DirectoryConfig.UPLOAD_DIR));
-            Files.createDirectories(Paths.get(DirectoryConfig.DECOMPILED_DIR));
-            logger.info("Created required directories: {}, {}", 
-                DirectoryConfig.UPLOAD_DIR, DirectoryConfig.DECOMPILED_DIR);
+            // Create all directories with full permissions
+            Path baseDir = Paths.get(DirectoryConfig.BASE_DIR);
+            Path uploadDir = Paths.get(DirectoryConfig.UPLOAD_DIR);
+            Path decompileDir = Paths.get(DirectoryConfig.DECOMPILED_DIR);
+
+            Files.createDirectories(baseDir);
+            Files.createDirectories(uploadDir);
+            Files.createDirectories(decompileDir);
+
+            // Set directory permissions if needed
+            baseDir.toFile().setWritable(true, false);
+            uploadDir.toFile().setWritable(true, false);
+            decompileDir.toFile().setWritable(true, false);
+
+            logger.info("Created directories at: {}", DirectoryConfig.BASE_DIR);
         } catch (IOException e) {
             logger.error("Failed to create directories: {}", e.getMessage());
             throw new RuntimeException("Failed to create required directories", e);
@@ -285,18 +295,25 @@ public class ModDecompilerService {
         try {
             this.currentModName = file.getOriginalFilename();
             Path filePath = Paths.get(DirectoryConfig.UPLOAD_DIR, this.currentModName);
-            
-            // Create the file if it doesn't exist
-            if (!Files.exists(filePath)) {
-                Files.createFile(filePath);
+            Path parent = filePath.getParent();
+
+            // Ensure parent directory exists with proper permissions
+            if (!Files.exists(parent)) {
+                Files.createDirectories(parent);
+                parent.toFile().setWritable(true, false);
             }
 
-            // Save the uploaded file
-            file.transferTo(filePath.toFile());
+            // Create temporary file first
+            Path tempFile = Files.createTempFile(parent, "upload_", ".tmp");
+            file.transferTo(tempFile.toFile());
+
+            // Move to final location
+            Files.move(tempFile, filePath, StandardCopyOption.REPLACE_EXISTING);
+            
             logger.info("Successfully uploaded mod: {} to {}", this.currentModName, filePath);
         } catch (IOException e) {
-            logger.error("Error handling file upload: {}", e.getMessage());
-            throw new RuntimeException("Failed to handle file upload", e);
+            logger.error("Error handling file upload: {} - {}", e.getClass().getName(), e.getMessage());
+            throw new RuntimeException("Failed to handle file upload: " + e.getMessage(), e);
         }
     }
 }
