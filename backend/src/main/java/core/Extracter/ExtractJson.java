@@ -138,24 +138,27 @@ public class ExtractJson {
                     new JsonObject();
                 
                 // Get minecraft version from depends
-                String mcVersion;
+                String currentVersion;
                 if (depends.has("minecraft")) {
-                    mcVersion = depends.get("minecraft").getAsString();
-                    LOGGER.info("Found version in depends: {}", mcVersion);
+                    currentVersion = depends.get("minecraft").getAsString();
+                    LOGGER.info("Found version in depends: {}", currentVersion);
                 } else if (modJson.has("minecraft")) {
-                    mcVersion = modJson.get("minecraft").getAsString();
-                    LOGGER.info("Found version in root: {}", mcVersion);
+                    currentVersion = modJson.get("minecraft").getAsString();
+                    LOGGER.info("Found version in root: {}", currentVersion);
                 } else {
                     LOGGER.error("No Minecraft version found in mod.json");
                     return;
                 }
                 
-                String cleanVersion = mcVersion.replaceAll("[>=<]", "").trim();
-                LOGGER.info("Original version: {} -> Clean version: {}", mcVersion, cleanVersion);
+                String cleanVersion = currentVersion.replaceAll("[>=<]", "").trim();
+                LOGGER.info("Original version: {} -> Clean version: {}", currentVersion, cleanVersion);
                 
-                // Set versions in version handler
+                // Set versions in version handler - use clean version for both initially
                 versionHandler.setCleanVersion(cleanVersion);
-                versionHandler.setMcVersion(mcVersion);
+                versionHandler.setMcVersion(cleanVersion);  // Set original version first
+                
+                // Process the mod with version handler
+                versionHandler.processMod(cleanVersion);
                 
                 LOGGER.info("Successfully processed mod.json");
             }

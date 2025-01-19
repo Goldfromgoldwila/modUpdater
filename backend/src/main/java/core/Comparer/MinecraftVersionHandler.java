@@ -256,16 +256,20 @@ public class MinecraftVersionHandler implements VersionHandlerService {
     }
 
     @Override
-    public void processMod(String mcVersion) {
+    public void processMod(String targetVersion) {
         try {
-            // Use the already set cleanVersion from ExtractJson
+            // cleanVersion should already be set from ExtractJson
             if (this.cleanVersion == null) {
-                this.cleanVersion = mcVersion.replaceAll("[>=<]", "").trim();
+                LOGGER.error("Clean version not set before processing");
+                return;
             }
             
-            LOGGER.info("Processing mod for Minecraft version: {}", this.cleanVersion);
+            // Update mcVersion with the target version from frontend
+            this.mcVersion = targetVersion;
+            LOGGER.info("Processing mod upgrade from {} to {}", this.cleanVersion, targetVersion);
+            
             createRequiredDirectories();
-            compareVersions(this.cleanVersion, mcVersion);
+            compareVersions(this.cleanVersion, targetVersion);
             
             LOGGER.info("Mod processing completed successfully");
         } catch (Exception e) {
