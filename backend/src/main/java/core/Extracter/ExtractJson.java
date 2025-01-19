@@ -18,6 +18,8 @@ import java.nio.file.*;
 import java.util.*;
 import core.Comparer.MinecraftVersionHandler;
 import org.springframework.beans.factory.annotation.Autowired;
+import java.util.zip.*;
+import com.google.gson.JsonSyntaxException;
 
 @Component
 @RestController
@@ -111,6 +113,35 @@ public class ExtractJson {
         }
     } 
 
+    public void processModJson(Path modPath) {
+        LOGGER.info("Processing mod.json from {}", modPath);
+        try (ZipFile zipFile = new ZipFile(modPath.toFile())) {
+            ZipEntry jsonEntry = zipFile.getEntry(MOD_JSON_FILE);
+            if (jsonEntry == null) {
+                LOGGER.error("No fabric.mod.json found in mod file");
+                return;
+            }
+
+            try (InputStream inputStream = zipFile.getInputStream(jsonEntry);
+                 BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
+                
+                JsonObject modJson = JsonParser.parseReader(reader).getAsJsonObject();
+                String mcVersion = modJson.get("minecraft").getAsString();
+                
+                String cleanVersion = versionParser.parseVersion(mcVersion);
+                LOGGER.info("Extracted Minecraft version: {}", cleanVersion);
+                
+                // Trigger version handling
+                versionHandler.processMod(cleanVersion);
+                
+            } catch (JsonSyntaxException e) {
+                LOGGER.error("Error parsing mod.json: {}", e.getMessage());
+            }
+        } catch (IOException e) {
+            LOGGER.error("Error processing mod.json: {}", e.getMessage());
+            throw new RuntimeException("Failed to process mod.json", e);
+        }
+    }
 
     private File findLatestModDirectory() {
         try {

@@ -6,6 +6,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import core.Extracter.ExtractJson;
+import core.Event.DecompilationCompleteEvent;
 
 import java.io.*;
 import java.nio.file.*;
@@ -21,7 +23,6 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.stream.Stream;
 import jakarta.annotation.PreDestroy;
-import core.event.DecompilationCompleteEvent;
 
 @Service
 public class ModDecompilerService {
@@ -39,38 +40,47 @@ public class ModDecompilerService {
     @Autowired
     private ApplicationEventPublisher eventPublisher;
 
+    @Autowired
+    private ExtractJson extractJson;
+
     public void decompileLatestMod() {
         try {
-            File latestMod = findLatestMod();
-            if (latestMod == null) {
-                logger.info("No mods found in upload directory");
+            Path uploadDir = Paths.get(UPLOAD_DIR);
+            if (!Files.exists(uploadDir)) {
+                logger.error("Upload directory does not exist");
                 return;
             }
 
-            logger.info("Found latest mod: {}", latestMod.getName());
-            currentModName = latestMod.getName().replaceFirst("\\.jar$", "");
-            File modDecompiledDir = new File(DECOMPILED_DIR, currentModName);
-            modDecompiledDir.mkdirs();
+            // Get the latest uploaded mod file
+            Optional<Path> latestMod = Files.list(uploadDir)
+                .filter(path -> path.toString().endsWith(".jar"))
+                .max(Comparator.comparingLong(path -> {
+                    try {
+                        return Files.getLastModifiedTime(path).toMillis();
+                    } catch (IOException e) {
+                        return 0L;
+                    }
+                }));
 
-            CompletableFuture<Void> extractionFuture = CompletableFuture.runAsync(() -> {
-                try {
-                    extractNonClassFiles(latestMod, modDecompiledDir);
-                } catch (IOException e) {
-                    throw new CompletionException(e);
-                }
-            }, executorService);
-
-            CompletableFuture<Void> decompilationFuture = CompletableFuture.runAsync(() -> {
-                decompileClassFiles(latestMod, modDecompiledDir);
-            }, executorService);
-
-            CompletableFuture.allOf(extractionFuture, decompilationFuture).join();
-            logger.info("Decompilation completed for mod: {}", currentModName);
-
-            eventPublisher.publishEvent(new DecompilationCompleteEvent(this, currentModName));
-
-        } catch (Exception e) {
-            logger.error("Error during decompilation process", e);
+            if (latestMod.isPresent()) {
+                Path modPath = latestMod.get();
+                logger.info("Decompiling latest mod: {}", modPath.getFileName());
+                
+                // Decompile the mod
+                decompileMod(modPath);
+                
+                // Extract and process mod.json
+                extractJson.processModJson(modPath);
+                
+                // Publish decompilation complete event
+                eventPublisher.publishEvent(new DecompilationCompleteEvent(this, modPath));
+                
+                logger.info("Decompilation and extraction completed successfully");
+            } else {
+                logger.warn("No mod files found in upload directory");
+            }
+        } catch (IOException e) {
+            logger.error("Error during decompilation: {}", e.getMessage());
             throw new RuntimeException("Decompilation failed", e);
         }
     }
@@ -231,5 +241,36 @@ public class ModDecompilerService {
 
     public String getCurrentModName() {
         return currentModName;
+    }
+
+    private void decompileMod(Path modPath) {
+        try {
+            String fileName = modPath.getFileName().toString();
+            Path outputDir = Paths.get(DECOMPILED_DIR, fileName.replace(".jar", ""));
+            
+            if (!Files.exists(outputDir)) {
+                Files.createDirectories(outputDir);
+            }
+
+            // Extract jar contents
+            try (ZipInputStream zis = new ZipInputStream(Files.newInputStream(modPath))) {
+                ZipEntry entry;
+                while ((entry = zis.getNextEntry()) != null) {
+                    Path entryPath = outputDir.resolve(entry.getName());
+                    
+                    if (entry.isDirectory()) {
+                        Files.createDirectories(entryPath);
+                    } else {
+                        Files.createDirectories(entryPath.getParent());
+                        Files.copy(zis, entryPath, StandardCopyOption.REPLACE_EXISTING);
+                    }
+                }
+            }
+
+            logger.info("Decompiled mod to: {}", outputDir);
+        } catch (IOException e) {
+            logger.error("Error decompiling mod: {}", e.getMessage());
+            throw new RuntimeException("Failed to decompile mod", e);
+        }
     }
 }

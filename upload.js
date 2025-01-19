@@ -304,45 +304,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.addEventListener('DOMContentLoaded', startPolling);
 });
 
-// Add this function to fetch and display the latest diff
-async function fetchLatestDiff() {
-    try {
-        const response = await fetch('https://modupdater.onrender.com/api/logs/latest-diff', {
-            method: 'GET',
-            headers: {
-                'Accept': 'application/json',
-                'Origin': 'https://goldfromgoldwila.github.io'
-            },
-            mode: 'cors',
-            credentials: 'omit'
-        });
-        
-        if (!response.ok) {
-            throw new Error(`Failed to fetch diff: ${response.status}`);
-        }
-        
-        const data = await response.json();
-        const resultDiv = document.getElementById('result');
-        
-        // Display the diff content
-        resultDiv.innerHTML = `
-            <h3>Latest Diff Report</h3>
-            <p>Generated: ${new Date(data.timestamp).toLocaleString()}</p>
-            <pre>${data.content}</pre>
-            <button onclick="downloadDiff()">Download Report</button>
-        `;
-    } catch (error) {
-        console.error('Error fetching diff:', error);
-    }
-}
 
-// Call this function after successful upload
-document.getElementById('upload-button').addEventListener('click', async () => {
-    // ... existing upload code ...
-    
-    // After successful upload, wait a bit for processing and fetch the diff
-    setTimeout(fetchLatestDiff, 2000);
-});
 
 async function downloadModFileDiff() {
     try {
