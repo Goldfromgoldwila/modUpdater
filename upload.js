@@ -5,11 +5,9 @@ async function downloadDiff() {
         const response = await fetch('https://modupdater.onrender.com/api/logs/download-diff', {
             method: 'GET',
             headers: {
-                'Accept': '*/*',
-                'Origin': window.location.origin
+                'Accept': '*/*'
             },
-            mode: 'cors',
-            credentials: 'omit'
+            mode: 'cors'
         });
         
         if (!response.ok) {
@@ -304,11 +302,9 @@ async function downloadModFileDiff() {
         const response = await fetch('https://modupdater.onrender.com/api/logs/mod-file-diff', {
             method: 'GET',
             headers: {
-                'Accept': '*/*',
-                'Origin': 'https://goldfromgoldwila.github.io'
+                'Accept': '*/*'
             },
-            mode: 'cors',
-            credentials: 'omit'
+            mode: 'cors'
         });
         
         if (!response.ok) {

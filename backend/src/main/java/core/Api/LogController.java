@@ -20,7 +20,6 @@ import org.springframework.http.HttpHeaders;
     "http://127.0.0.1:5500",
     "https://goldfromgoldwila.github.io"
 }, 
-allowedHeaders = "*",
 exposedHeaders = {"Content-Disposition"},
 methods = {RequestMethod.GET, RequestMethod.POST, RequestMethod.OPTIONS})
 public class LogController {
