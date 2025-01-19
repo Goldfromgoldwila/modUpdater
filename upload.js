@@ -71,21 +71,23 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // Add event listener to the button when DOM is loaded
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', () => {
     const dropZone = document.getElementById('drop-zone');
     const fileInput = document.getElementById('file-input');
     const uploadButton = document.getElementById('upload-button');
     const progressBar = document.getElementById('progress-bar');
     const progressText = document.getElementById('progress-text');
+    const versionSelect = document.getElementById('mc-version');
 
     // Check if required elements exist
-    if (!dropZone || !fileInput || !uploadButton || !progressBar || !progressText) {
+    if (!dropZone || !fileInput || !uploadButton || !progressBar || !progressText || !versionSelect) {
         console.error('Required DOM elements not found:', {
             dropZone: !!dropZone,
             fileInput: !!fileInput,
             uploadButton: !!uploadButton,
             progressBar: !!progressBar,
-            progressText: !!progressText
+            progressText: !!progressText,
+            versionSelect: !!versionSelect
         });
         return;
     }
@@ -105,8 +107,13 @@ document.addEventListener('DOMContentLoaded', function() {
     dropZone.addEventListener('drop', (e) => {
         e.preventDefault();
         dropZone.classList.remove('dragover');
+        
         const files = e.dataTransfer.files;
-        handleFiles(files);
+        if (files.length) {
+            fileInput.files = files;
+            uploadButton.style.display = 'block';
+            dropZone.textContent = `Selected: ${files[0].name}`;
+        }
     });
 
     // Click to upload
@@ -114,48 +121,43 @@ document.addEventListener('DOMContentLoaded', function() {
         fileInput.click();
     });
 
-    fileInput.addEventListener('change', (e) => {
-        handleFiles(e.target.files);
-    });
-
-    function handleFiles(files) {
-        if (files.length > 0) {
-            const file = files[0];
-            if (file.name.endsWith('.jar')) {
-                console.log(`File selected: ${file.name} (${formatFileSize(file.size)})`);
-                uploadButton.style.display = 'block';
-                uploadButton.textContent = `Upload ${file.name}`;
-            } else {
-                console.error('Invalid file type selected. Please select a .jar file');
-                alert('Please select a .jar file');
-            }
+    fileInput.addEventListener('change', () => {
+        if (fileInput.files.length) {
+            uploadButton.style.display = 'block';
+            dropZone.textContent = `Selected: ${fileInput.files[0].name}`;
         }
-    }
+    });
 
     uploadButton.addEventListener('click', async () => {
         try {
-            const fileInput = document.querySelector('input[type="file"]');
-            const selectedVersion = document.getElementById('versionSelect').value;
-            const progressBar = document.getElementById('progressBar');
-            const progressText = document.getElementById('progressText');
-
             if (!fileInput.files.length) {
                 throw new Error('Please select a file first');
             }
 
+            const selectedVersion = versionSelect.value;
+            if (!selectedVersion) {
+                throw new Error('Please select a version');
+            }
+
+            progressBar.style.display = 'block';
             progressBar.value = 25;
             progressText.textContent = 'Uploading...';
 
             const formData = new FormData();
             formData.append('file', fileInput.files[0]);
-            formData.append('targetVersion', selectedVersion);  // Add target version to form data
+            formData.append('targetVersion', selectedVersion);
 
             console.log('Uploading file and target version:', selectedVersion);
             
             const uploadResponse = await fetch("https://modupdater.onrender.com/api/upload", {
                 method: "POST",
                 body: formData,
-                credentials: 'include'
+                mode: 'cors',
+                credentials: 'include',
+                headers: {
+                    'Accept': '*/*',
+                    'Origin': window.location.origin,
+                }
             });
 
             if (!uploadResponse.ok) {
@@ -164,11 +166,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const result = await uploadResponse.json();
             console.log("Process successful!", result);
-            console.log("Changes found:", {
-                added: result.added?.length || 0,
-                removed: result.removed?.length || 0,
-                modified: result.modified?.length || 0
-            });
 
             progressBar.value = 100;
             progressText.textContent = 'Complete!';
@@ -188,8 +185,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 type: error.name,
                 stack: error.stack
             });
-            progressText.textContent = `Error: ${error.message}`;
-            progressBar.classList.add('error');
+            if (progressText) {
+                progressText.textContent = `Error: ${error.message}`;
+            }
+            if (progressBar) {
+                progressBar.classList.add('error');
+            }
         }
     });
 
