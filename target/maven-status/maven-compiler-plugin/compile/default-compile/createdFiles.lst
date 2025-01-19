@@ -4,7 +4,6 @@ core\Decompiler\ModDecompilerService.class
 core\Extracter\VersionParser.class
 core\Api\UploadController.class
 core\Extracter\ExtractJson.class
-core\Api\ConvertController.class
 Api\HealthController.class
 core\Event\DecompilationCompleteEvent.class
 core\Comparer\VersionHandlerService.class

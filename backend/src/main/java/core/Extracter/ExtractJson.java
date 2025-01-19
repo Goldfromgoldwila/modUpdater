@@ -36,6 +36,7 @@ public class ExtractJson {
     private VersionParser versionParser;
 
     private String targetVersion;
+    private String originalVersion;
 
     public void processMod(String targetVersion) {
         this.targetVersion = targetVersion;
@@ -96,6 +97,7 @@ public class ExtractJson {
                 String currentVersion = depends.has("minecraft") ? 
                     depends.get("minecraft").getAsString() : "";
                 
+                this.originalVersion = currentVersion;  // Store the original version
                 String cleanVersion = currentVersion.replaceAll("[>=<]", "").trim();
                 LOGGER.info("Found original version: {} (clean: {})", currentVersion, cleanVersion);
                 
@@ -140,5 +142,7 @@ public class ExtractJson {
         return jsonObject.getAsJsonObject("depends");
     }
 
- 
+    public String getOriginalVersion() {
+        return originalVersion;
+    }
 }

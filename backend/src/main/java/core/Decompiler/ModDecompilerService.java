@@ -8,6 +8,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import core.Extracter.ExtractJson;
 import core.Event.DecompilationCompleteEvent;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.io.*;
 import java.nio.file.*;
@@ -271,6 +272,30 @@ public class ModDecompilerService {
         } catch (IOException e) {
             logger.error("Error decompiling mod: {}", e.getMessage());
             throw new RuntimeException("Failed to decompile mod", e);
+        }
+    }
+
+    public void handleFileUpload(MultipartFile file) {
+        try {
+            // Create upload directory if it doesn't exist
+            Path uploadDir = Paths.get(UPLOAD_DIR);
+            if (!Files.exists(uploadDir)) {
+                Files.createDirectories(uploadDir);
+            }
+
+            // Generate unique filename with timestamp
+            String timestamp = String.valueOf(System.currentTimeMillis());
+            String fileName = "mod" + timestamp + ".jar";
+            Path filePath = uploadDir.resolve(fileName);
+
+            // Save the uploaded file
+            file.transferTo(filePath.toFile());
+            this.currentModName = fileName;
+            
+            logger.info("Uploaded mod: {}", fileName);
+        } catch (IOException e) {
+            logger.error("Error handling file upload: {}", e.getMessage());
+            throw new RuntimeException("Failed to handle file upload", e);
         }
     }
 }

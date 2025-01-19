@@ -133,66 +133,37 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     uploadButton.addEventListener('click', async () => {
-        const file = fileInput.files[0];
-        const selectedVersion = document.getElementById("mc-version").value;
-        
-        if (!file) {
-            console.error('No file selected');
-            alert('Please select a file first');
-            return;
-        }
-
         try {
-            // Create new filename based on timestamp
-            const timestamp = new Date().getTime();
-            const newFileName = `mod${timestamp}.jar`;
-            
-            // Create new File object with the new name
-            const renamedFile = new File([file], newFileName, {
-                type: file.type,
-                lastModified: file.lastModified,
-            });
+            const fileInput = document.querySelector('input[type="file"]');
+            const selectedVersion = document.getElementById('versionSelect').value;
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
 
-            console.log(`Original filename: ${file.name}`);
-            console.log(`New filename: ${newFileName}`);
+            if (!fileInput.files.length) {
+                throw new Error('Please select a file first');
+            }
+
+            progressBar.value = 25;
+            progressText.textContent = 'Uploading...';
 
             const formData = new FormData();
-            formData.append('file', renamedFile);
-            formData.append('version', selectedVersion);
-            formData.append('originalName', file.name); // Store original name if needed
+            formData.append('file', fileInput.files[0]);
+            formData.append('targetVersion', selectedVersion);  // Add target version to form data
 
-            // Show progress
-            progressBar.style.display = 'block';
-            progressBar.value = 0;
-            progressText.textContent = 'Uploading...';
-            uploadButton.disabled = true;
-
-            const response = await fetch('https://modupdater.onrender.com/api/upload', {
-                method: 'POST',
-                body: formData
-            });
-
-            if (!response.ok) {
-                throw new Error(`Upload failed: ${response.statusText}`);
-            }
-
-            console.log('File upload successful');
-            progressBar.value = 50;
-            progressText.textContent = 'Processing...';
-
-            console.log('Starting conversion process...');
-            const convertResponse = await fetch("https://modupdater.onrender.com/api/convert", {
+            console.log('Uploading file and target version:', selectedVersion);
+            
+            const uploadResponse = await fetch("https://modupdater.onrender.com/api/upload", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ version: selectedVersion })
+                body: formData,
+                credentials: 'include'
             });
 
-            if (!convertResponse.ok) {
-                throw new Error(`Conversion failed: ${convertResponse.statusText}`);
+            if (!uploadResponse.ok) {
+                throw new Error(`Upload failed: ${uploadResponse.statusText}`);
             }
 
-            const result = await convertResponse.json();
-            console.log("Conversion successful!", result);
+            const result = await uploadResponse.json();
+            console.log("Process successful!", result);
             console.log("Changes found:", {
                 added: result.added?.length || 0,
                 removed: result.removed?.length || 0,
@@ -205,7 +176,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const resultDiv = document.getElementById("result");
             if (resultDiv) {
                 resultDiv.innerHTML = `
-                    <h3>Conversion Complete!</h3>
+                    <h3>Process Complete!</h3>
                     <pre>${JSON.stringify(result, null, 2)}</pre>
                 `;
             }
@@ -219,9 +190,6 @@ document.addEventListener('DOMContentLoaded', function() {
             });
             progressText.textContent = `Error: ${error.message}`;
             progressBar.classList.add('error');
-        } finally {
-            console.log('Process completed');
-            uploadButton.disabled = false;
         }
     });
 
