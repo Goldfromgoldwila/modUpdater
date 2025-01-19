@@ -258,12 +258,14 @@ public class MinecraftVersionHandler implements VersionHandlerService {
     @Override
     public void processMod(String mcVersion) {
         try {
-            this.mcVersion = mcVersion;
-            this.cleanVersion = mcVersion.replaceAll("[>=<]", "").trim();
+            // Use the already set cleanVersion from ExtractJson
+            if (this.cleanVersion == null) {
+                this.cleanVersion = mcVersion.replaceAll("[>=<]", "").trim();
+            }
             
-            LOGGER.info("Processing mod for Minecraft version: {}", cleanVersion);
+            LOGGER.info("Processing mod for Minecraft version: {}", this.cleanVersion);
             createRequiredDirectories();
-            compareVersions(cleanVersion, mcVersion);
+            compareVersions(this.cleanVersion, mcVersion);
             
             LOGGER.info("Mod processing completed successfully");
         } catch (Exception e) {

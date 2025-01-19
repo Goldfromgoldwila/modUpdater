@@ -122,26 +122,36 @@ public class ExtractJson {
             try (InputStream inputStream = zipFile.getInputStream(jsonEntry);
                  BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
                 
-                JsonObject modJson = JsonParser.parseReader(reader).getAsJsonObject();
+                // Read the entire JSON content
+                StringBuilder jsonContent = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    jsonContent.append(line).append("\n");
+                }
                 
-                // Get the depends object or create it if it doesn't exist
+                // Log the original JSON content
+                LOGGER.info("=== Original fabric.mod.json Content ===\n{}", jsonContent.toString());
+                
+                JsonObject modJson = JsonParser.parseString(jsonContent.toString()).getAsJsonObject();
                 JsonObject depends = modJson.has("depends") ? 
                     modJson.getAsJsonObject("depends") : 
                     new JsonObject();
                 
-                // Get minecraft version from depends, or try root level if not found
+                // Get minecraft version from depends
                 String mcVersion;
                 if (depends.has("minecraft")) {
                     mcVersion = depends.get("minecraft").getAsString();
+                    LOGGER.info("Found version in depends: {}", mcVersion);
                 } else if (modJson.has("minecraft")) {
                     mcVersion = modJson.get("minecraft").getAsString();
+                    LOGGER.info("Found version in root: {}", mcVersion);
                 } else {
                     LOGGER.error("No Minecraft version found in mod.json");
                     return;
                 }
                 
                 String cleanVersion = mcVersion.replaceAll("[>=<]", "").trim();
-                LOGGER.info("Extracted Minecraft version: {}", cleanVersion);
+                LOGGER.info("Original version: {} -> Clean version: {}", mcVersion, cleanVersion);
                 
                 // Set versions in version handler
                 versionHandler.setCleanVersion(cleanVersion);
